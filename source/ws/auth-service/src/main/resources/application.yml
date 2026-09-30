@@ -1,0 +1,67 @@
+# Todos los valores sensibles o dependientes del entorno se sobreescriben con variables
+# de entorno (docker-compose / ConfigMap y Secret de Kubernetes).
+# Para desarrollo local: SPRING_PROFILES_ACTIVE=dev (ver application-dev.yml).
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: auth-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/repositorio}
+    username: ${DB_USERNAME:repositorio}
+    password: ${DB_PASSWORD:repositorio}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # el esquema lo maneja exclusivamente Flyway
+
+  # auth-service es el dueno de las migraciones en Sprint 1
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Tiempos cortos: si Redis cae, responder 503 rapido en vez de colgar el request
+      timeout: 2s
+      connect-timeout: 2s
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+app:
+  seguridad:
+    jwt:
+      secreto: ${JWT_SECRET}             # obligatorio: Base64, minimo 32 bytes. Nunca en el repo.
+      emisor: repositorio-uagrm
+      access-ttl-por-defecto: 1h         # se reemplaza por ConfigFacultad.jwtExpiracionHoras si existe
+      refresh-ttl: 7d
+    dos-factores:
+      emisor: Repositorio UAGRM
+      ttl-pendiente: 300s
+      max-intentos: 5
+    cors-origenes: ${CORS_ORIGENES:http://localhost:4200}
+
+  admin-inicial:
+    habilitado: ${ADMIN_INICIAL_HABILITADO:false}
+    usuario: ${ADMIN_INICIAL_USUARIO:admin}
+    password: ${ADMIN_INICIAL_PASSWORD:}
+    correo: ${ADMIN_INICIAL_CORREO:admin@uagrm.edu.bo}
+    ci: ${ADMIN_INICIAL_CI:1}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness y /readiness para Kubernetes

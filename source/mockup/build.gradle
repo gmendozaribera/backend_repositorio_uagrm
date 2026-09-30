@@ -1,0 +1,4 @@
+// Mocks y datos de prueba compartidos entre los tests de los microservicios
+dependencies {
+    api project(':dto')
+}

@@ -1,0 +1,20 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+description = 'auth-service :8081 — JWT, 2FA TOTP, refresh, logout, auto-registro'
+
+dependencies {
+    implementation project(':imp')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-flyway'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation project(':mockup')
+}
+
+// Solo el jar ejecutable (evita el -plain.jar en build/libs)
+tasks.named('jar') {
+    enabled = false
+}

@@ -1,1 +1,13 @@
 rootProject.name = 'repositorio-backend'
+
+// Módulos compartidos
+include 'dao', 'dto', 'imp', 'spec', 'mockup'
+project(':dao').projectDir    = file('source/dao')
+project(':dto').projectDir    = file('source/dto')
+project(':imp').projectDir    = file('source/imp')
+project(':spec').projectDir   = file('source/spec')
+project(':mockup').projectDir = file('source/mockup')
+
+// Microservicios (se agregan por Sprint)
+include 'auth-service'
+project(':auth-service').projectDir = file('source/ws/auth-service')

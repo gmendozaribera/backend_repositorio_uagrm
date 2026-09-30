@@ -1,0 +1,14 @@
+# Solo para desarrollo local. Valores alineados con docker-compose/dev/.env.example.
+spring:
+  data:
+    redis:
+      password: ${REDIS_PASSWORD:redis_dev_password}
+
+app:
+  seguridad:
+    jwt:
+      # Secreto SOLO de desarrollo. En Kubernetes llega por Secret (JWT_SECRET).
+      secreto: ${JWT_SECRET:ZGV2LXNvbG8tcGFyYS1kZXNhcnJvbGxvLWNhbWJpYXItZW4tcHJvZHVjY2lvbiE=}
+  admin-inicial:
+    habilitado: true
+    password: ${ADMIN_INICIAL_PASSWORD:Admin2026.}

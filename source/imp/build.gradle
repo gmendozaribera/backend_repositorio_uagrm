@@ -1,0 +1,12 @@
+// Servicios, validadores, jobs Quartz, servicios Redis, seguridad compartida y manejo global de errores
+dependencies {
+    api project(':dao')
+    api project(':dto')
+    api 'org.springframework.boot:spring-boot-starter-webmvc'
+    api 'org.springframework.boot:spring-boot-starter-security'
+    api 'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server'
+    api 'org.springframework.boot:spring-boot-starter-data-redis'
+    api "dev.samstevens.totp:totp:${totpVersion}"
+
+    testImplementation project(':mockup')
+}
