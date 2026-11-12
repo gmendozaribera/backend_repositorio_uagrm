@@ -32,6 +32,19 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew :auth-service:bootRun         # :8081, admi
 - `source/spec` — contratos OpenAPI · `source/mockup` — builders para tests
 - `source/ws/<servicio>` — `SecurityFilterChain` + controllers. Las `Application` viven en el paquete raíz `com.uagrm.repositorio`.
 
+## Contratos OpenAPI (contract-first)
+El contrato manda: `source/spec/src/main/resources/openapi/<servicio>-api.yaml` (OpenAPI **3.0.3**).
+Todo cambio de API empieza editando el YAML; después el código.
+- **Backend:** NO genera código. Lo verifica `<Servicio>ContratoTest` (`@WebMvcTest` + `openapi-request-validator-mockmvc`):
+  cada request/response real se valida contra el YAML; propiedades no declaradas fallan.
+- **Frontend:** genera modelos y cliente con `ng-openapi-gen` desde el YAML (nunca escribir interfaces a mano).
+- **Mock:** `docker compose -f docker-compose/dev/docker-compose.yml --profile mock up -d contrato-mock` → Prism en :4010.
+- **Control de cambios:** `script/contratos.sh` (Redocly lint + oasdiff contra `origin/main`). Un breaking change
+  falla el build salvo que se suba la versión MAYOR de `info.version`. Corre en la etapa `Contratos` de Jenkins.
+- Envoltorios planos por tipo (`RespuestaTokens`, `RespuestaLogin`...): 3.0 no tiene genéricos y `allOf` rompe la
+  validación estricta. Objeto nullable: `type: object` + `nullable: true` + `allOf: [$ref]`.
+- Excepciones del linter en `.redocly.lint-ignore.yaml`, cada una con su justificación.
+
 ## Reglas de desarrollo
 1. Implementar solo el Sprint actual; no adelantar lógica de sprints futuros. Preguntar sprint y módulo antes de implementar.
 2. Si la tarea toca Redis, confirmar namespace de keys y TTL con el usuario antes de generar código.

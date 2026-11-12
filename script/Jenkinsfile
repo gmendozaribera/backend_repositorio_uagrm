@@ -18,6 +18,15 @@ pipeline {
             }
         }
 
+        // Lint de los contratos OpenAPI + deteccion de cambios incompatibles contra main (requiere Node y Docker).
+        // Los tests de contrato (AuthContratoTest) corren en la etapa Test.
+        stage('Contratos') {
+            steps {
+                sh 'git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main'
+                sh 'bash script/contratos.sh origin/main'
+            }
+        }
+
         stage('Build') {
             steps {
                 sh './gradlew clean assemble --no-daemon'

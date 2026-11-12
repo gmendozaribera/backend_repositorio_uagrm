@@ -1,0 +1,7 @@
+# Excepciones del linter de contratos. Cada una debe explicar por que es un falso positivo.
+source/spec/src/main/resources/openapi/auth-api.yaml:
+  # tokens es `type: object, nullable: true, allOf: [TokenResponse]` (patron estandar de OpenAPI 3.0 para
+  # una referencia nullable). El validador de ejemplos de Redocly ignora `nullable` junto a `allOf`;
+  # AuthContratoTest confirma que la respuesta real con tokens = null cumple el contrato.
+  no-invalid-media-type-examples:
+    - '#/paths/~1api~1v1~1auth~1login/post/responses/200/content/application~1json/examples/conDosFactores/value/data/tokens'

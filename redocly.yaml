@@ -1,0 +1,15 @@
+# Reglas de calidad para los contratos OpenAPI (source/spec/src/main/resources/openapi/*.yaml).
+# Ejecutar: npx @redocly/cli@2 lint
+apis:
+  auth:
+    root: source/spec/src/main/resources/openapi/auth-api.yaml
+
+extends:
+  - recommended
+
+rules:
+  operation-operationId: error        # el cliente generado usa operationId como nombre de metodo
+  operation-4xx-response: error
+  no-unused-components: error
+  tag-description: warn
+  no-server-example.com: off         # localhost es el servidor de desarrollo a proposito

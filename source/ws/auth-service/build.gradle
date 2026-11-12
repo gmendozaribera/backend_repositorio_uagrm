@@ -12,6 +12,11 @@ dependencies {
     runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation project(':mockup')
+    // Tests de contrato: cada request/response se valida contra spec/openapi/auth-api.yaml
+    testImplementation project(':spec')
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation "com.atlassian.oai:openapi-request-validator-mockmvc:${openapiValidatorVersion}"
 }
 
 // Solo el jar ejecutable (evita el -plain.jar en build/libs)

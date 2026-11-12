@@ -67,6 +67,19 @@ services:
       redis:
         condition: service_healthy
 
+  # Mock del contrato para desarrollo en paralelo: responde segun los ejemplos de auth-api.yaml
+  # y rechaza requests que no cumplen el contrato.
+  #   docker compose --profile mock up -d contrato-mock   ->  http://localhost:4010/api/v1/auth/login
+  # Header "Prefer: example=conDosFactores" elige un ejemplo; "Prefer: code=401" fuerza un error.
+  contrato-mock:
+    profiles: ["mock"]
+    image: stoplight/prism:5.12.0   # la etiqueta "5" (latest) no arranca: bug isPrimary
+    command: ["mock", "-h", "0.0.0.0", "/contratos/auth-api.yaml"]
+    volumes:
+      - ../../source/spec/src/main/resources/openapi:/contratos:ro
+    ports:
+      - "4010:4010"
+
 volumes:
   postgres-data:
   redis-data:

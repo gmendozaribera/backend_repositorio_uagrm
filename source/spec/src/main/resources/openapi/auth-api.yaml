@@ -1,0 +1,573 @@
+openapi: 3.0.3
+info:
+  title: Repositorio Digital UAGRM - auth-service
+  version: 1.0.0
+  description: |
+    Autenticacion: login con JWT, verificacion en dos pasos (TOTP), renovacion de sesion,
+    logout con revocacion real y cambio de contrasena.
+
+    **Contrato fuente de verdad.** El backend lo verifica con tests de contrato
+    (`AuthContratoTest`) y el frontend genera su cliente TypeScript desde este archivo.
+    Todo cambio pasa por aqui primero; los cambios incompatibles requieren subir la version mayor.
+
+    Formato de respuestas:
+    - Exito: `{ data, message, status, timestamp }`
+    - Error: `ProblemDetail` (RFC 7807) con `timestamp`; en validaciones incluye `errores` (campo -> mensaje).
+  contact:
+    name: Equipo Repositorio Digital FICCT
+  license:
+    name: Uso academico UAGRM
+    url: https://www.uagrm.edu.bo
+servers:
+  - url: http://localhost:8081
+    description: Desarrollo local
+tags:
+  - name: Autenticacion
+    description: Inicio y cierre de sesion, renovacion y cambio de contrasena
+  - name: DosFactores
+    description: Verificacion en dos pasos con Google Authenticator (TOTP)
+
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Autenticacion]
+      operationId: login
+      summary: Paso 1 del login
+      description: |
+        Sin 2FA devuelve los tokens. Con 2FA devuelve `requiereDosFactores = true` y un `tokenTemporal`
+        valido por 5 minutos para completar `/api/v1/auth/2fa/verify`.
+        Si `usuario.requiereCambioPassword` es true, el token solo permite `/password/change` y `/logout`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Credenciales correctas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaLogin'
+              examples:
+                sinDosFactores:
+                  summary: Usuario sin 2FA
+                  value:
+                    data:
+                      requiereDosFactores: false
+                      tokenTemporal: null
+                      tokens:
+                        accessToken: eyJhbGciOiJIUzI1NiJ9.e30.access
+                        refreshToken: eyJhbGciOiJIUzI1NiJ9.e30.refresh
+                        tipoToken: Bearer
+                        expiraEn: 3600
+                        usuario:
+                          idUsuario: 1
+                          usuario: admin
+                          nombre: Administrador
+                          apellidos: del Sistema
+                          correo: admin@uagrm.edu.bo
+                          rol: ADMIN
+                          requiereCambioPassword: false
+                          twoFactorEnabled: false
+                    message: Inicio de sesion exitoso
+                    status: 200
+                    timestamp: '2026-11-11T14:00:00Z'
+                conDosFactores:
+                  summary: Usuario con 2FA activo
+                  value:
+                    data:
+                      requiereDosFactores: true
+                      tokenTemporal: q8Zt0yX3cG1mVbN4hJ7kLpR2sW5uE9aD6fT0iO3yH1g
+                      tokens: null
+                    message: Ingrese el codigo de su aplicacion autenticadora
+                    status: 200
+                    timestamp: '2026-11-11T14:00:00Z'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/2fa/verify:
+    post:
+      tags: [DosFactores]
+      operationId: verificarDosFactores
+      summary: Paso 2 del login
+      description: Maximo 5 codigos erroneos por `tokenTemporal`; el sexto intento devuelve 429 y anula la sesion pendiente.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerificarDosFactoresRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '429':
+          $ref: '#/components/responses/DemasiadosIntentos'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Autenticacion]
+      operationId: refrescar
+      summary: Renovar la sesion
+      description: |
+        Rotacion: cada refresh token sirve una sola vez. Guardar siempre el `refreshToken` nuevo;
+        reutilizar uno viejo devuelve 401.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Autenticacion]
+      operationId: logout
+      summary: Cerrar sesion
+      description: Revoca el access token. Si se envia el refresh token, tambien se revoca.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/password/change:
+    post:
+      tags: [Autenticacion]
+      operationId: cambiarPassword
+      summary: Cambiar contrasena
+      description: |
+        Obligatorio en el primer login con password_default. Cierra todas las demas sesiones del usuario
+        y devuelve tokens nuevos que reemplazan a los actuales.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CambioPasswordRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/Tokens'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/2fa/enable:
+    post:
+      tags: [DosFactores]
+      operationId: activarDosFactores
+      summary: Iniciar la activacion de 2FA
+      description: Genera el secreto y el QR. El 2FA queda inactivo hasta confirmarlo con `/2fa/confirm`.
+      responses:
+        '200':
+          description: Secreto y QR generados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaActivarDosFactores'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/2fa/confirm:
+    post:
+      tags: [DosFactores]
+      operationId: confirmarDosFactores
+      summary: Confirmar la activacion de 2FA con un codigo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodigoTotpRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/auth/2fa/disable:
+    post:
+      tags: [DosFactores]
+      operationId: desactivarDosFactores
+      summary: Desactivar 2FA con un codigo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CodigoTotpRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token devuelto por login, 2fa/verify, refresh o password/change.
+
+  responses:
+    Tokens:
+      description: Sesion iniciada o renovada
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RespuestaTokens'
+    SinDatos:
+      description: Operacion realizada (data es null)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RespuestaSinDatos'
+    DatosInvalidos:
+      description: Cuerpo invalido o regla de negocio incumplida
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 400
+            title: Datos invalidos
+            detail: Uno o mas campos no son validos.
+            instance: /api/v1/auth/password/change
+            timestamp: '2026-11-11T14:00:00Z'
+            errores:
+              passwordNueva: debe contener al menos una mayuscula, una minuscula y un numero
+    NoAutenticado:
+      description: Credenciales incorrectas, token ausente/invalido/expirado o sesion cerrada
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 401
+            title: No autorizado
+            detail: Usuario o contrasena incorrectos.
+            instance: /api/v1/auth/login
+            timestamp: '2026-11-11T14:00:00Z'
+    AccesoDenegado:
+      description: Cuenta desactivada, rol sin permiso o contrasena pendiente de cambio
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 403
+            title: Acceso denegado
+            detail: Debe cambiar su contrasena antes de continuar (POST /api/v1/auth/password/change).
+            instance: /api/v1/auth/2fa/enable
+            timestamp: '2026-11-11T14:00:00Z'
+    Conflicto:
+      description: El estado actual no permite la operacion
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    DemasiadosIntentos:
+      description: Se supero el maximo de codigos erroneos
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    ServicioNoDisponible:
+      description: Redis no responde; por seguridad se rechaza la operacion
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+
+  schemas:
+    # ---------- Requests ----------
+    LoginRequest:
+      type: object
+      required: [usuario, password]
+      properties:
+        usuario:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: est.juan
+        password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 100
+    VerificarDosFactoresRequest:
+      type: object
+      required: [tokenTemporal, codigo]
+      properties:
+        tokenTemporal:
+          type: string
+          minLength: 1
+        codigo:
+          $ref: '#/components/schemas/CodigoTotp'
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+    LogoutRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          nullable: true
+    CambioPasswordRequest:
+      type: object
+      required: [passwordActual, passwordNueva]
+      properties:
+        passwordActual:
+          type: string
+          format: password
+          minLength: 1
+        passwordNueva:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$'
+          description: 8 a 72 caracteres, con al menos una mayuscula, una minuscula y un numero.
+    CodigoTotpRequest:
+      type: object
+      required: [codigo]
+      properties:
+        codigo:
+          $ref: '#/components/schemas/CodigoTotp'
+    CodigoTotp:
+      type: string
+      pattern: '^\d{6}$'
+      description: Codigo de 6 digitos de la aplicacion autenticadora.
+      example: '123456'
+
+    # ---------- Datos ----------
+    Rol:
+      type: string
+      enum: [ADMIN, DOCENTE, ESTUDIANTE]
+    UsuarioSesion:
+      type: object
+      required: [idUsuario, usuario, nombre, apellidos, correo, rol, requiereCambioPassword, twoFactorEnabled]
+      properties:
+        idUsuario:
+          type: integer
+          format: int32
+        usuario:
+          type: string
+        nombre:
+          type: string
+        apellidos:
+          type: string
+        correo:
+          type: string
+          format: email
+        rol:
+          $ref: '#/components/schemas/Rol'
+        requiereCambioPassword:
+          type: boolean
+          description: Si es true, el frontend debe llevar al usuario a cambiar su contrasena.
+        twoFactorEnabled:
+          type: boolean
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, tipoToken, expiraEn, usuario]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tipoToken:
+          type: string
+          enum: [Bearer]
+        expiraEn:
+          type: integer
+          format: int64
+          description: Segundos de vida del access token.
+        usuario:
+          $ref: '#/components/schemas/UsuarioSesion'
+    LoginResponse:
+      type: object
+      required: [requiereDosFactores, tokenTemporal, tokens]
+      description: Sin 2FA `tokens` viene lleno; con 2FA llega `tokenTemporal` y `tokens` es null.
+      properties:
+        requiereDosFactores:
+          type: boolean
+        tokenTemporal:
+          type: string
+          nullable: true
+        tokens:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/TokenResponse'
+    ActivarDosFactoresResponse:
+      type: object
+      required: [secreto, otpAuthUri, qrDataUri]
+      properties:
+        secreto:
+          type: string
+          description: Clave para ingreso manual en la app autenticadora.
+        otpAuthUri:
+          type: string
+          example: otpauth://totp/Repositorio%20UAGRM:admin?secret=ABC&issuer=Repositorio%20UAGRM
+        qrDataUri:
+          type: string
+          description: PNG del QR como data URI, listo para un img src.
+          example: data:image/png;base64,iVBORw0KGgo=
+
+    # ---------- Envoltorios ApiResponse<T> ----------
+    # OpenAPI 3.0 no tiene genericos: un esquema plano por cada tipo de data.
+    RespuestaLogin:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/LoginResponse'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaTokens:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/TokenResponse'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaActivarDosFactores:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/ActivarDosFactoresResponse'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaSinDatos:
+      type: object
+      description: Operaciones sin resultado; data siempre es null.
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: object
+          nullable: true
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---------- Errores ----------
+    ProblemDetail:
+      type: object
+      required: [status, title, timestamp]
+      properties:
+        type:
+          type: string
+        status:
+          type: integer
+          format: int32
+        title:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        errores:
+          type: object
+          description: Solo en errores de validacion; campo -> mensaje.
+          additionalProperties:
+            type: string
