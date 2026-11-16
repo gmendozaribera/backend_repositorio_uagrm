@@ -40,11 +40,26 @@ function MethodBadge({ m }) {
 const DECISIONS = [
   { cat:"Autenticación", items:[
     { q:"2FA obligatorio", a:"Opcional por usuario. Habilitado desde el perfil. No obligatorio para ningún rol. Implementado con TOTP (Google Authenticator compatible)." },
-    { q:"Duración sesión JWT", a:"Configurable por administrador en ConfigFacultad. Por defecto: 1 hora (access token) + 7 días (refresh token)." },
+    { q:"Duración sesión JWT", a:"Configurable por administrador en ConfigFacultad (jwtExpiracionHoras de la facultad del usuario). Por defecto: 1 hora (access token) + 7 días (refresh token, con rotación: cada refresh se usa una sola vez)." },
+    { q:"Firma y contenido del JWT [implementado S1]", a:"HS256 con Nimbus (spring-security-oauth2-resource-server), secreto JWT_SECRET (Base64 ≥ 32 bytes, obligatorio fuera de dev). Claims: sub=idUsuario, usuario, rol, pwd_change, typ (access|refresh), jti, iat_ms (milisegundos: evita que un token emitido en el mismo segundo sobreviva a un cambio de contraseña). Todos los servicios validan el mismo token como resource servers." },
+    { q:"Login con 2FA [implementado S1]", a:"Paso 1 /login devuelve un tokenTemporal aleatorio (no el idUsuario, para evitar fuerza bruta) válido 5 min; paso 2 /2fa/verify. Máx. 5 códigos erróneos, el sexto da 429 y anula la sesión pendiente. Activación en dos pasos: /2fa/enable (secreto + QR) y /2fa/confirm." },
+    { q:"Primer login / contraseña temporal [implementado S1]", a:"Columna usuario.requiere_cambio_password (no estaba en el modelo original). Con pwd_change=true el token solo permite /password/change y /logout (403 en lo demás). Política: 8–72 caracteres con mayúscula, minúscula y número. Admin inicial creado al arrancar (ADMIN_INICIAL_PASSWORD) y obligado a cambiarla." },
+    { q:"Redis caído en autenticación [implementado S1]", a:"Fail-closed: si Redis no responde, toda petición autenticada devuelve 503 (no se puede verificar si el token fue revocado). Aplica también a los GET de catálogos (decisión 2026-11-16)." },
+  ]},
+  { cat:"Stack y contratos (decisiones de implementación)", items:[
+    { q:"Versión del stack", a:"Java 25 + Spring Boot 4.1.1 (Spring Security 7, Jackson 3, Hibernate 7, Gradle 9 multimodulo) en lugar de Java 17 / Boot 3. Frontend Angular 22 standalone, zoneless, signals, sin librería UI (CSS propio con la paleta del modelo), tests con Vitest." },
+    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.1.0, catalog-api 1.1.0, user-api 1.0.0." },
+    { q:"Control de cambios de contrato", a:"script/contratos.sh (etapa 'Contratos' de Jenkins): Redocly lint + oasdiff breaking contra origin/main. Un breaking change falla el build salvo que se suba la versión MAYOR de info.version." },
+    { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012." },
+    { q:"Puertos de los microservicios", a:"auth-service :8081, catalog-service :8082, user-service :8083 (se intercambiaron user y catalog respecto al modelo original porque catálogos se implementó primero). Nginx/proxy enrutan por prefijo: /api/v1/auth → 8081; /api/v1/usuarios, /tipos-usuario, /padron → 8083; resto → 8082." },
+    { q:"Migraciones", a:"Flyway en source/dao; las aplica SOLO auth-service. Los demás servicios validan el esquema (ddl-auto: validate) y en docker-compose esperan el healthcheck de auth-service. Futuro K8s: Job de migración dedicado." },
+    { q:"Formato de respuestas", a:"Éxito: { data, message, status, timestamp } con un envoltorio plano por tipo en OpenAPI (RespuestaX) porque 3.0 no tiene genéricos. Error: ProblemDetail RFC 7807 con timestamp y, en validaciones, mapa 'errores' campo → mensaje." },
   ]},
   { cat:"Registro de usuarios", items:[
-    { q:"Auto-registro estudiantes", a:"Permitido con validación previa: el CI/registro debe existir en EstudianteHabilitado (padrón importado). Sin match → registro bloqueado." },
-    { q:"Importación padrón institucional", a:"CSV/Excel manual subido por el administrador. Estructura: registro, ci, correo, password_default, nombres, apellidos, idCarrera (o sigla_carrera). El sistema valida e inserta en EstudianteHabilitado." },
+    { q:"Auto-registro estudiantes", a:"POST /api/v1/auth/register {ci, registro} (público). Si coinciden con una fila habilitada de EstudianteHabilitado se crea Persona + Usuario ESTUDIANTE con usuario = número de registro y contraseña = password_default del padrón (cambio obligatorio en el primer login). No devuelve tokens. Sin match o inhabilitado → 404 'No encontrado en el padrón institucional'; ya tiene cuenta → 409. Conocer el CI y registro de otra persona no da acceso: hace falta la contraseña entregada por la facultad." },
+    { q:"Importación padrón institucional", a:"CSV (coma o punto y coma, UTF-8), XLSX o XLS subido por el administrador (máx. 5 MB y 10 000 filas). Cabecera obligatoria con las columnas en cualquier orden. Upsert por registro (insertados / actualizados), errores por fila sin cortar la importación; las cuentas ya creadas no se tocan. La sigla_carrera se resuelve a id_carrera (FK). password_default se guarda cifrada con BCrypt, nunca en texto plano." },
+    { q:"Recuperar contraseña", a:"Mientras no exista recuperación por correo (llega con SMTP), el administrador restablece la contraseña desde user-service (POST /usuarios/{id}/password/reset): contraseña temporal + cambio obligatorio + cierre de todas las sesiones." },
+    { q:"Desactivar usuario", a:"Borrado lógico (estado 0) que además cierra todas sus sesiones (auth:revocado-desde). Cambiar el rol también las cierra. Un admin no puede desactivarse ni quitarse el rol ADMIN a sí mismo." },
     { q:"Estructura CSV padrón", a:"registro, ci, correo, password_default, nombres, apellidos, sigla_carrera. Ejemplo: 123456,7654321,est@uagrm.edu.bo,Uagrm2024.,Juan,Pérez,ITIN" },
   ]},
   { cat:"Archivos y formatos", items:[
@@ -75,22 +90,24 @@ const DECISIONS = [
     { q:"Escala de calificación", a:"Configurable por administrador por facultad/curso en ConfigFacultad. Por defecto: 0–100." },
   ]},
   { cat:"Roles y permisos", items:[
-    { q:"Docente Administrador de Curso", a:"Designado por administrador. Puede ser Admin de N cursos simultáneamente. Solo gestiona trabajos y calificaciones dentro de esos grupos. No puede crear/eliminar estudiantes." },
+    { q:"Docente Administrador de Curso", a:"Designado por administrador. Puede ser Admin de N cursos simultáneamente. Solo gestiona trabajos y calificaciones dentro de esos grupos. No puede crear/eliminar estudiantes. Se asigna con POST /grupos/{id}/docentes y se cambia con PATCH /grupos/{id}/docentes/{idUsuario} {esAdminCurso}." },
+    { q:"Permisos por servicio [implementado S2]", a:"catalog-service: GET para cualquier rol autenticado, escrituras solo ADMIN. user-service: todo solo ADMIN. Con contraseña pendiente de cambio → 403 en todo salvo /password/change y /logout." },
     { q:"Acceso externo", a:"Configurable por facultad. Usuario anónimo: solo metadatos. Descarga de archivos: requiere cuenta registrada en el sistema." },
   ]},
   { cat:"Escalabilidad y base de datos", items:[
     { q:"Entidad Facultad", a:"Agregada desde el inicio. Carrera depende de Facultad. Cada facultad tiene su ConfigFacultad independiente. Permite que toda la UAGRM adopte el sistema." },
     { q:"Base de datos definitiva", a:"PostgreSQL 15. Full-text search con tsvector/tsquery nativo. El documento Word había referenciado MySQL — PostgreSQL es la elección definitiva." },
     { q:"GitHub/GitLab", a:"Solo guarda URL como texto. No requiere autenticación OAuth." },
+    { q:"Catálogos: convenciones [implementado S2]", a:"Sin borrado físico: DELETE desactiva (estado 0) y devuelve el registro; se reactiva con PUT estado 1. Listados sin paginar, por defecto solo activos (incluirInactivos=true para admin). Siglas en MAYÚSCULAS; sigla de carrera única global (la usa el padrón). Semestre tiene estado (no estaba en el modelo) y tipo_trabajo.estado es INT. Materia y semestre de un grupo deben ser de la misma facultad." },
   ]},
   { cat:"Redis — Caché, Rate Limiting y Colas", items:[
     { q:"¿Por qué Redis?", a:"Múltiples estudiantes suben documentos simultáneamente al cierre de semestre. Redis protege MinIO y work-service ante picos de carga sin rechazar peticiones válidas, y además resuelve invalidación de JWT, caché de catálogos y polling eficiente de plagio." },
     { q:"Rate limiting en uploads", a:"INCR rate:upload:usuario:{id} con TTL 60s. Si supera N requests/minuto → HTTP 429 Too Many Requests. Protege MinIO y work-service en picos de subida masiva sin tocar PostgreSQL." },
-    { q:"Blacklist JWT (logout real)", a:"Al hacer logout o cambio de contraseña: SET blacklist:jwt:{jti} 'revoked' EX {expiracion}. Cada request valida que el jti del token no esté en blacklist. Resuelve la invalidación real de tokens antes de su expiración natural." },
-    { q:"Caché de catálogos", a:"Materias, semestres, carreras, tipos de trabajo y fases cambian poco pero se consultan constantemente. Redis caché con TTL 10 min. Hit → respuesta <5ms. Miss → consulta PostgreSQL → guarda en Redis." },
+    { q:"Blacklist JWT (logout real) [implementado S1]", a:"Logout y rotación de refresh: SET auth:blacklist:{jti} con TTL = vida restante del token. Cambio de contraseña, reset, cambio de rol o desactivación: SET auth:revocado-desde:{idUsuario} (epoch ms, TTL 7 d) que invalida todos los tokens emitidos antes. Un único MGET por request." },
+    { q:"Caché de catálogos [implementado S2]", a:"Cache-aside en catalog-service: catalog:cache:{entidad}:todas | catalog:cache:{entidad}:facultad:{id}, TTL 600 s. Un SET índice catalog:cache:{entidad}:indice permite invalidar sin KEYS/SCAN; la invalidación ocurre después del commit. Se cachean facultades, carreras, materias, semestres, fases y tipos de trabajo (no grupos ni listados con inactivos). Si Redis falla en la caché → PostgreSQL (sin 503)." },
     { q:"Estado del análisis de plagio", a:"SET plagio:status:{idTrabajo} 'EN_PROCESO' EX 600. Angular hace polling cada 5s contra Redis (no contra PostgreSQL). Cuando Copyleaks responde: SET plagio:status:{idTrabajo} 'COMPLETADO'. Evita N hits a BD durante el análisis." },
     { q:"Cola de uploads (buffer ante picos)", a:"En lugar de que N estudiantes golpeen MinIO directamente: LPUSH queue:uploads:{facultad} {payload}. work-service consume con BRPOP procesando de a N en paralelo. Buffer ante subidas simultáneas masivas al cierre de semestre." },
-    { q:"Namespaces de keys por microservicio", a:"auth:blacklist:* · auth:2fa:pending:* · catalog:cache:* · work:rate:upload:* · work:queue:uploads:* · plagio:status:* · notif:pending:*" },
+    { q:"Namespaces de keys por microservicio", a:"auth:blacklist:{jti} · auth:revocado-desde:{idUsuario} · auth:2fa:pending:{tokenTemporal} (300 s) · auth:2fa:intentos:{tokenTemporal} (300 s) · catalog:cache:* (600 s) · work:rate:upload:* · work:queue:uploads:* · plagio:status:* · notif:pending:*. Todas las keys se construyen solo en imp.redis.ClavesRedis y siempre con TTL." },
     { q:"Dependencias Spring Boot", a:"spring-boot-starter-data-redis + spring-boot-starter-cache. Un contenedor Redis más en docker-compose y Kubernetes. Sin cambios arquitecturales a los microservicios existentes." },
   ]},
 ];
@@ -98,15 +115,15 @@ const DECISIONS = [
 const MERMAID_ER = `erDiagram
     FACULTAD { int idFacultad PK; varchar nombre; varchar sigla; int estado }
     CARRERA { int idCarrera PK; varchar nombre; varchar sigla; int idFacultad FK; int estado }
-    ESTUDIANTE_HABILITADO { int id PK; int ci; int registro; varchar nombre; varchar apellidos; varchar siglaCarrera; boolean habilitado }
+    ESTUDIANTE_HABILITADO { int id PK; int registro UK; int ci UK; varchar correo; varchar passwordDefault; varchar nombres; varchar apellidos; int idCarrera FK; boolean habilitado; timestamp fechaImportacion }
     PERSONA { int idPersona PK; varchar nombre; varchar apellidos; int ci; varchar correo; int celular; date fechaNac; int registro; int idCarrera FK }
     TIPO_USUARIO { int idTipoUsuario PK; varchar nombre; varchar descripcion; int estado }
-    USUARIO { int idUsuario PK; varchar usuario; varchar password; boolean twoFactorEnabled; varchar totpSecret; int idTipoUsuario FK; int idPersona FK; int estado }
-    SEMESTRE { int idSemestre PK; int semestre; int anio; int idFacultad FK }
+    USUARIO { int idUsuario PK; varchar usuario; varchar password; boolean requiereCambioPassword; boolean twoFactorEnabled; varchar totpSecret; int idTipoUsuario FK; int idPersona FK; int estado }
+    SEMESTRE { int idSemestre PK; int semestre; int anio; int idFacultad FK; int estado }
     MATERIA { int idMateria PK; varchar nombre; varchar sigla; int idFacultad FK; int estado }
     GRUPO { int idGrupo PK; varchar nombre; int idMateria FK; int idSemestre FK; int estado }
     GRUPO_DOCENTE { int idGrupo FK; int idUsuario FK; boolean esAdminCurso }
-    TIPO_TRABAJO { int idTipoTrabajo PK; varchar nombre; varchar estado; int idFacultad FK }
+    TIPO_TRABAJO { int idTipoTrabajo PK; varchar nombre; int estado; int idFacultad FK }
     FASE { int idFase PK; varchar nombre; varchar descripcion; int idFacultad FK; int estado }
     TRABAJO { int idTrabajo PK; varchar titulo; varchar resumen; int estado; int calificacion; varchar observaciones; int idPersona FK; int idMateria FK; int idTipoTrabajo FK; int idGrupo FK; int idSemestre FK }
     AUTOR { int idAutor PK; int idTrabajo FK }
@@ -149,15 +166,15 @@ const MERMAID_ER = `erDiagram
 const ENTITIES = [
   { name:"Facultad",              color:"#1B3A6B", attrs:[["idFacultad","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["estado","INT"]] },
   { name:"Carrera",               color:"#1B3A6B", attrs:[["idCarrera","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["idFacultad","INT FK"],["estado","INT"]] },
-  { name:"EstudianteHabilitado",  color:"#065F46", attrs:[["id","INT PK"],["ci","INT"],["registro","INT"],["nombre","VARCHAR"],["apellidos","VARCHAR"],["siglaCarrera","VARCHAR"],["habilitado","BOOLEAN"]] },
+  { name:"EstudianteHabilitado",  color:"#065F46", attrs:[["id","INT PK"],["registro","INT UNIQUE"],["ci","INT UNIQUE"],["correo","VARCHAR"],["passwordDefault","VARCHAR (BCrypt)"],["nombres","VARCHAR"],["apellidos","VARCHAR"],["idCarrera","INT FK"],["habilitado","BOOLEAN"],["fechaImportacion","TIMESTAMP"]] },
   { name:"Persona",               color:"#374151", attrs:[["idPersona","INT PK"],["nombre","VARCHAR"],["apellidos","VARCHAR"],["ci","INT"],["correo","VARCHAR"],["celular","INT"],["fechaNac","DATE"],["registro","INT"],["idCarrera","INT FK"]] },
   { name:"TipoUsuario",           color:"#374151", attrs:[["idTipoUsuario","INT PK"],["nombre","VARCHAR"],["descripcion","VARCHAR"],["estado","INT"]] },
-  { name:"Usuario",               color:"#374151", attrs:[["idUsuario","INT PK"],["usuario","VARCHAR"],["password","VARCHAR"],["twoFactorEnabled","BOOLEAN"],["totpSecret","VARCHAR"],["idTipoUsuario","INT FK"],["idPersona","INT FK"],["estado","INT"]] },
-  { name:"Semestre",              color:"#92400E", attrs:[["idSemestre","INT PK"],["semestre","INT"],["anio","INT"],["idFacultad","INT FK"]] },
+  { name:"Usuario",               color:"#374151", attrs:[["idUsuario","INT PK"],["usuario","VARCHAR"],["password","VARCHAR"],["requiereCambioPassword","BOOLEAN"],["twoFactorEnabled","BOOLEAN"],["totpSecret","VARCHAR"],["idTipoUsuario","INT FK"],["idPersona","INT FK"],["estado","INT"]] },
+  { name:"Semestre",              color:"#92400E", attrs:[["idSemestre","INT PK"],["semestre","INT"],["anio","INT"],["idFacultad","INT FK"],["estado","INT"]] },
   { name:"Materia",               color:"#92400E", attrs:[["idMateria","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["idFacultad","INT FK"],["estado","INT"]] },
   { name:"Grupo",                 color:"#92400E", attrs:[["idGrupo","INT PK"],["nombre","VARCHAR"],["idMateria","INT FK"],["idSemestre","INT FK"],["estado","INT"]] },
   { name:"GrupoDocente",          color:"#5B21B6", attrs:[["idGrupo","INT FK"],["idUsuario","INT FK"],["esAdminCurso","BOOLEAN"]] },
-  { name:"TipoTrabajo",           color:"#065F46", attrs:[["idTipoTrabajo","INT PK"],["nombre","VARCHAR"],["estado","VARCHAR"],["idFacultad","INT FK"]] },
+  { name:"TipoTrabajo",           color:"#065F46", attrs:[["idTipoTrabajo","INT PK"],["nombre","VARCHAR"],["estado","INT"],["idFacultad","INT FK"]] },
   { name:"Fase",                  color:"#065F46", attrs:[["idFase","INT PK"],["nombre","VARCHAR"],["descripcion","VARCHAR"],["idFacultad","INT FK"],["estado","INT"]] },
   { name:"Trabajo",               color:"#991B1B", attrs:[["idTrabajo","INT PK"],["titulo","VARCHAR"],["resumen","TEXT"],["estado","INT"],["calificacion","INT"],["observaciones","TEXT"],["idPersona","INT FK"],["idMateria","INT FK"],["idTipoTrabajo","INT FK"],["idGrupo","INT FK"],["idSemestre","INT FK"]] },
   { name:"Autor",                 color:"#991B1B", attrs:[["idAutor","INT PK"],["idTrabajo","INT FK"]] },
@@ -195,46 +212,52 @@ registro,ci,correo,password_default,nombres,apellidos,sigla_carrera
 789012,3456789,maria.gomez@uagrm.edu.bo,Uagrm2024.,María,Gómez Ríos,ITIC
 
 # Notas:
-# - password_default: contraseña temporal, el estudiante debe cambiarla en primer login
+# - Formatos: .csv (coma o punto y coma, UTF-8), .xlsx, .xls (primera hoja). Máx. 5 MB / 10 000 filas
+# - La cabecera es obligatoria; columnas en cualquier orden, sin distinguir mayúsculas
+# - registro identifica la fila: si ya existe se actualiza, si no se inserta
+# - password_default: contraseña temporal (se guarda con BCrypt); el estudiante debe cambiarla en primer login
 # - sigla_carrera: debe coincidir con la sigla registrada en la tabla Carrera
 # - El sistema valida cada fila y reporta errores sin interrumpir la importación`;
 
 const API_GROUPS = [
-  { group:"Auth", color:"#5B21B6", endpoints:[
-    { m:"POST", p:"/api/v1/auth/login",           d:"Autenticar → JWT access + refresh" },
-    { m:"POST", p:"/api/v1/auth/refresh",          d:"Renovar access token" },
-    { m:"POST", p:"/api/v1/auth/logout",           d:"Invalidar sesión" },
-    { m:"POST", p:"/api/v1/auth/register",         d:"Auto-registro estudiante (valida EstudianteHabilitado)" },
-    { m:"POST", p:"/api/v1/auth/2fa/enable",       d:"Habilitar 2FA TOTP en la cuenta" },
-    { m:"POST", p:"/api/v1/auth/2fa/verify",       d:"Verificar código TOTP" },
-    { m:"POST", p:"/api/v1/auth/password/change",  d:"Cambiar contraseña (obligatorio en primer login con password_default)" },
+  { group:"Auth — auth-service :8081 (auth-api 1.1.0)", color:"#5B21B6", endpoints:[
+    { m:"POST", p:"/api/v1/auth/login",           d:"Paso 1: JWT access + refresh, o tokenTemporal si tiene 2FA" },
+    { m:"POST", p:"/api/v1/auth/2fa/verify",       d:"Paso 2: código TOTP → tokens (máx. 5 intentos)" },
+    { m:"POST", p:"/api/v1/auth/refresh",          d:"Renovar sesión (rotación del refresh token)" },
+    { m:"POST", p:"/api/v1/auth/logout",           d:"Cerrar sesión (blacklist del access y del refresh)" },
+    { m:"POST", p:"/api/v1/auth/register",         d:"Auto-registro estudiante {ci, registro} validado contra el padrón (sin tokens)" },
+    { m:"POST", p:"/api/v1/auth/password/change",  d:"Cambiar contraseña (obligatorio en primer login) → tokens nuevos" },
+    { m:"POST", p:"/api/v1/auth/2fa/enable",       d:"Iniciar activación 2FA: secreto + QR" },
+    { m:"POST", p:"/api/v1/auth/2fa/confirm",      d:"Confirmar activación 2FA con un código" },
+    { m:"POST", p:"/api/v1/auth/2fa/disable",      d:"Desactivar 2FA con un código" },
   ]},
-  { group:"Usuarios", color:"#1B3A6B", endpoints:[
-    { m:"GET",    p:"/api/v1/usuarios",                       d:"Listar usuarios paginados con filtros" },
+  { group:"Usuarios y Padrón — user-service :8083 (user-api 1.0.0, solo ADMIN)", color:"#1B3A6B", endpoints:[
+    { m:"GET",    p:"/api/v1/usuarios",                       d:"Listar paginado (q, rol, idCarrera, incluirInactivos, pagina, tamano)" },
     { m:"GET",    p:"/api/v1/usuarios/{id}",                  d:"Obtener usuario" },
-    { m:"POST",   p:"/api/v1/usuarios",                       d:"Crear usuario (Admin)" },
-    { m:"PUT",    p:"/api/v1/usuarios/{id}",                  d:"Actualizar usuario" },
-    { m:"DELETE", p:"/api/v1/usuarios/{id}",                  d:"Desactivar usuario" },
-    { m:"GET",    p:"/api/v1/tipos-usuario",                  d:"Listar tipos de usuario" },
-    { m:"POST",   p:"/api/v1/padron/import",                  d:"Importar CSV/Excel de padrón estudiantil (multipart)" },
-    { m:"GET",    p:"/api/v1/padron",                         d:"Listar estudiantes habilitados" },
+    { m:"POST",   p:"/api/v1/usuarios",                       d:"Crear usuario con contraseña inicial (cambio obligatorio)" },
+    { m:"PUT",    p:"/api/v1/usuarios/{id}",                  d:"Actualizar datos, rol y estado (login inmutable)" },
+    { m:"DELETE", p:"/api/v1/usuarios/{id}",                  d:"Desactivar usuario y cerrar sus sesiones" },
+    { m:"POST",   p:"/api/v1/usuarios/{id}/password/reset",   d:"Restablecer contraseña temporal + cerrar sesiones" },
+    { m:"GET",    p:"/api/v1/tipos-usuario",                  d:"Listar roles" },
+    { m:"POST",   p:"/api/v1/padron/import",                  d:"Importar CSV/XLSX/XLS del padrón (multipart 'archivo') → resumen + errores por fila" },
+    { m:"GET",    p:"/api/v1/padron",                         d:"Listar padrón paginado (q, idCarrera, registrado, habilitado)" },
+    { m:"PATCH",  p:"/api/v1/padron/{id}",                    d:"Habilitar / inhabilitar estudiante para el auto-registro" },
   ]},
-  { group:"Facultades & Catálogos", color:"#065F46", endpoints:[
-    { m:"GET",  p:"/api/v1/facultades",                d:"Listar facultades" },
-    { m:"POST", p:"/api/v1/facultades",                d:"Crear facultad" },
-    { m:"PUT",  p:"/api/v1/facultades/{id}",           d:"Actualizar facultad" },
-    { m:"GET",  p:"/api/v1/carreras",                  d:"Listar carreras (filtro: idFacultad)" },
-    { m:"POST", p:"/api/v1/carreras",                  d:"Crear carrera" },
-    { m:"GET",  p:"/api/v1/materias",                  d:"Listar materias (filtro: idFacultad)" },
-    { m:"POST", p:"/api/v1/materias",                  d:"Crear materia" },
-    { m:"GET",  p:"/api/v1/semestres",                 d:"Listar semestres" },
-    { m:"POST", p:"/api/v1/semestres",                 d:"Crear semestre" },
-    { m:"GET",  p:"/api/v1/grupos",                    d:"Listar grupos (filtro: idMateria, idSemestre)" },
-    { m:"POST", p:"/api/v1/grupos",                    d:"Crear grupo" },
-    { m:"POST", p:"/api/v1/grupos/{id}/docentes",      d:"Asignar docente a grupo (con flag esAdminCurso)" },
-    { m:"GET",  p:"/api/v1/fases",                     d:"Listar fases" },
-    { m:"POST", p:"/api/v1/fases",                     d:"Crear fase" },
-    { m:"GET",  p:"/api/v1/tipos-trabajo",             d:"Listar tipos de trabajo" },
+  { group:"Catálogos — catalog-service :8082 (catalog-api 1.1.0)", color:"#065F46", endpoints:[
+    { m:"GET",    p:"/api/v1/facultades",                       d:"Listar (incluirInactivos) — caché Redis" },
+    { m:"POST",   p:"/api/v1/facultades",                       d:"Crear (ADMIN)" },
+    { m:"PUT",    p:"/api/v1/facultades/{id}",                  d:"Actualizar / reactivar con estado 1 (ADMIN)" },
+    { m:"DELETE", p:"/api/v1/facultades/{id}",                  d:"Desactivar, borrado lógico (ADMIN)" },
+    { m:"GET",    p:"/api/v1/carreras",                         d:"Listar (idFacultad, incluirInactivos) — mismo CRUD que facultades" },
+    { m:"GET",    p:"/api/v1/materias",                         d:"Listar (idFacultad) — POST / PUT / DELETE igual" },
+    { m:"GET",    p:"/api/v1/semestres",                        d:"Listar (idFacultad) — POST / PUT / DELETE igual" },
+    { m:"GET",    p:"/api/v1/grupos",                           d:"Listar (idFacultad, idMateria, idSemestre) — sin caché; POST / PUT / DELETE" },
+    { m:"GET",    p:"/api/v1/grupos/{id}/docentes",             d:"Docentes del grupo" },
+    { m:"POST",   p:"/api/v1/grupos/{id}/docentes",             d:"Asignar docente {idUsuario, esAdminCurso} (ADMIN)" },
+    { m:"PATCH",  p:"/api/v1/grupos/{id}/docentes/{idUsuario}", d:"Cambiar esAdminCurso (ADMIN)" },
+    { m:"DELETE", p:"/api/v1/grupos/{id}/docentes/{idUsuario}", d:"Quitar docente (borrado físico de la relación)" },
+    { m:"GET",    p:"/api/v1/fases",                            d:"Listar (idFacultad) — POST / PUT / DELETE" },
+    { m:"GET",    p:"/api/v1/tipos-trabajo",                    d:"Listar (idFacultad) — POST / PUT / DELETE" },
   ]},
   { group:"Trabajos", color:"#991B1B", endpoints:[
     { m:"GET",    p:"/api/v1/trabajos",                  d:"Listar trabajos (filtros: facultad, carrera, materia, semestre, tipo, hashtag, estado)" },
@@ -278,9 +301,9 @@ const USER_STORIES = [
   { cu:"CU-REG", sprint:2, name:"Auto-registro Estudiante",
     story:"Como estudiante de la UAGRM, quiero registrarme en el sistema ingresando mi CI y número de registro para obtener acceso.",
     criteria:[
-      "DADO que el estudiante ingresa CI y registro válidos, CUANDO el sistema valida contra EstudianteHabilitado, ENTONCES permite completar el registro.",
+      "DADO que el estudiante ingresa CI y registro válidos, CUANDO el sistema valida contra EstudianteHabilitado (habilitado), ENTONCES crea su cuenta con usuario = número de registro y le indica que inicie sesión con la contraseña entregada por su facultad.",
       "DADO que el CI/registro no existe en EstudianteHabilitado, CUANDO intenta registrarse, ENTONCES ve: 'No encontrado en el padrón institucional. Contacte a su facultad.'",
-      "DADO que ya tiene cuenta, CUANDO intenta registrarse de nuevo con el mismo CI, ENTONCES el sistema informa duplicado y sugiere recuperar contraseña.",
+      "DADO que ya tiene cuenta, CUANDO intenta registrarse de nuevo con el mismo CI, ENTONCES el sistema informa duplicado y sugiere contactar a su facultad para restablecer la contraseña.",
       "DADO que es primer login con password_default, CUANDO accede, ENTONCES el sistema obliga al cambio de contraseña antes de continuar.",
     ]},
   { cu:"CU-IMP", sprint:2, name:"Importar Padrón Estudiantil",
@@ -289,6 +312,7 @@ const USER_STORIES = [
       "DADO CSV válido con columnas (registro, ci, correo, password_default, nombres, apellidos, sigla_carrera), CUANDO se importa, ENTONCES el sistema inserta/actualiza en EstudianteHabilitado y muestra resumen (insertados, actualizados, errores).",
       "DADO una fila con datos inválidos (CI no numérico, carrera inexistente), CUANDO se procesa, ENTONCES esa fila va al log de errores sin interrumpir la importación.",
       "DADO archivo con formato incorrecto (.pdf), CUANDO se intenta subir, ENTONCES el sistema rechaza con formatos válidos (CSV, XLSX, XLS).",
+      "DADO un registro que ya existe en el padrón, CUANDO se reimporta, ENTONCES se actualizan sus datos y su contraseña por defecto (cifrada), sin modificar una cuenta ya creada.",
     ]},
   { cu:"CU6", sprint:3, name:"Crear Trabajo",
     story:"Como estudiante, quiero crear un trabajo asociado a una materia, grupo y semestre para enviarlo a revisión.",
@@ -336,40 +360,43 @@ const USER_STORIES = [
     ]},
 ];
 
+// Estado de tareas: ✅ hecho · 🚧 en curso · ⏳ pendiente
 const SPRINTS = [
-  { num:1, title:"Infraestructura + Auth + 2FA", duration:"3 semanas",
+  { num:1, title:"Infraestructura + Auth + 2FA ✅", duration:"3 semanas · cerrado",
     goal:"Sistema base funcional con autenticación JWT, 2FA opcional, estructura multimodulo Gradle configurada y entorno Docker levantado.",
     tasks:[
-      "Configurar proyecto multimodulo Gradle: dao / dto / imp / spec / mockup / ws/",
-      "Configurar PostgreSQL 15 + Flyway para migraciones de esquema",
-      "Entidades: Facultad, Carrera, Persona, TipoUsuario, Usuario, ConfigFacultad, ConfigSMTP",
-      "Spring Security + JWT (access 1h / refresh 7d, configurable por ConfigFacultad)",
-      "2FA con TOTP (Google Authenticator) — opcional por usuario",
-      "Flujo cambio de contraseña obligatorio en primer login (password_default)",
-      "Angular: proyecto standalone, routing, AuthGuard, RoleGuard, JwtInterceptor",
-      "Módulo Auth Angular: login + pantalla verificación 2FA + cambio contraseña",
-      "docker-compose dev: PostgreSQL + MinIO + Redis + servicios",
-      "Configurar Redis: namespaces por microservicio, TTLs base, cliente Spring Data Redis",
-      "Implementar blacklist JWT en Redis (logout real + cambio de contraseña)",
-      "Pipeline Jenkins básico: build + test",
+      "✅ Configurar proyecto multimodulo Gradle: dao / dto / imp / spec / mockup / ws/",
+      "✅ Configurar PostgreSQL 15 + Flyway para migraciones de esquema",
+      "✅ Entidades: Facultad, Carrera, Persona, TipoUsuario, Usuario, ConfigFacultad, ConfigSMTP",
+      "✅ Spring Security + JWT (access 1h / refresh 7d, configurable por ConfigFacultad)",
+      "✅ 2FA con TOTP (Google Authenticator) — opcional por usuario",
+      "✅ Flujo cambio de contraseña obligatorio en primer login (password_default)",
+      "✅ Angular: proyecto standalone, routing, AuthGuard, RoleGuard, JwtInterceptor",
+      "✅ Módulo Auth Angular: login + pantalla verificación 2FA + cambio contraseña",
+      "✅ docker-compose dev: PostgreSQL + MinIO + Redis + servicios",
+      "✅ Configurar Redis: namespaces por microservicio, TTLs base, cliente Spring Data Redis",
+      "✅ Implementar blacklist JWT en Redis (logout real + cambio de contraseña)",
+      "✅ Pipeline Jenkins básico: build + test + etapa 'Contratos' (Redocly + oasdiff)",
+      "✅ Contratos OpenAPI 3.0.3 contract-first + test de contrato + mock Prism (agregado)",
     ], cu:["CU1"]},
-  { num:2, title:"Usuarios + Padrón CSV + Catálogos", duration:"3 semanas",
+  { num:2, title:"Usuarios + Padrón CSV + Catálogos 🚧", duration:"3 semanas · en curso",
     goal:"Auto-registro validado contra padrón importado, CRUD de usuarios, catálogos completos por facultad y configuración SMTP.",
     tasks:[
-      "ws/user-service: CRUD Persona, Usuario, TipoUsuario",
-      "EstudianteHabilitado: tabla + endpoint importación CSV/Excel (Apache POI)",
-      "Validación de estructura CSV + reporte de errores por fila",
-      "Flujo auto-registro: validación CI/registro → creación de cuenta",
-      "ws/catalog-service: Facultad, Carrera, Materia, Semestre, Grupo, GrupoDocente, Fase, TipoTrabajo",
-      "Endpoint asignación docente a grupo con flag esAdminCurso",
-      "ConfigFacultad: GET/PUT + pantalla de configuración en Admin Angular",
-      "ConfigSMTP: GET/PUT + pantalla de configuración + botón 'Enviar correo de prueba'",
-      "Notificaciones in-app: sistema de campana + badge con polling",
-      "Notificaciones por correo SMTP: integración Spring Mail (opcional por usuario)",
-      "Módulo Admin Angular: usuarios, importación padrón, catálogos",
-      "Quartz job: limpieza de tokens JWT expirados",
-      "Caché Redis para catálogos: materias, semestres, carreras, fases (TTL 10 min, invalidación al actualizar)",
-      "Pruebas unitarias JUnit 5 + Mockito: servicios usuario y catálogo",
+      "✅ ws/catalog-service (:8082): Facultad, Carrera, Materia, Semestre, Grupo, GrupoDocente, Fase, TipoTrabajo (contrato catalog-api 1.1.0)",
+      "✅ Endpoint asignación docente a grupo con flag esAdminCurso + PATCH para cambiarlo + filtro de grupos por facultad",
+      "✅ Caché Redis para catálogos (catalog:cache:*, TTL 10 min, índice SET, invalidación tras commit, degrada a PostgreSQL)",
+      "✅ Angular: cliente generado con ng-openapi-gen + Admin de Catálogos (/admin/catalogos)",
+      "🚧 ws/user-service (:8083): CRUD Persona + Usuario, TipoUsuario, reset de contraseña (contrato user-api 1.0.0)",
+      "🚧 EstudianteHabilitado: tabla (V4) + importación CSV/XLSX/XLS (Apache POI) con errores por fila y password_default en BCrypt",
+      "🚧 Flujo auto-registro: POST /auth/register valida CI + registro contra el padrón → crea la cuenta",
+      "🚧 Angular: /registro, /admin/usuarios, /admin/padron y buscador de docentes en grupos",
+      "⏳ Rate limiting del auto-registro con Redis (contra enumeración del padrón) — pendiente de confirmar keys/TTL",
+      "⏳ ConfigFacultad: GET/PUT + pantalla de configuración en Admin Angular",
+      "⏳ ConfigSMTP: GET/PUT + pantalla de configuración + botón 'Enviar correo de prueba'",
+      "⏳ Notificaciones in-app: sistema de campana + badge con polling",
+      "⏳ Notificaciones por correo SMTP: integración Spring Mail (opcional por usuario)",
+      "⏳ Quartz job: limpieza de tokens JWT expirados (las keys de Redis ya expiran solas por TTL; revisar si sigue haciendo falta)",
+      "🚧 Pruebas unitarias JUnit 5 + Mockito + tests de contrato: servicios usuario y catálogo",
     ], cu:["CU-REG","CU-IMP","CU-CFG"]},
   { num:3, title:"Repositorio de Trabajos", duration:"3 semanas",
     goal:"Flujo completo de creación → revisión → aprobación con múltiples documentos y todos los formatos permitidos.",
@@ -411,7 +438,7 @@ const SPRINTS = [
       "Hardening Spring Security: CORS, CSRF, rate limiting, headers HTTP (HSTS, CSP)",
       "Manifiestos K8s: Deployments, Services, Ingress, ConfigMaps, Secrets por microservicio",
       "Jenkinsfile: build → test → docker build → push → kubectl apply",
-      "Documentación OpenAPI 3 / Swagger UI por microservicio",
+      "Swagger UI por microservicio (los contratos OpenAPI ya existen desde S1); cifrado de totpSecret; rate limiting de login por IP",
       "Seed de datos FICCT para demo: facultad, carreras, materias, usuarios de prueba",
       "Revisión final de criterios de aceptación de todos los CU",
     ], cu:[]},
@@ -419,16 +446,16 @@ const SPRINTS = [
 
 const BACKEND_STRUCT = `proyecto-ws/
 ├── source/
-│   ├── build.gradle (padre — BOM Spring Boot 3)
+│   ├── build.gradle (padre — BOM Spring Boot 4.1.1, Java 25)
 │   ├── dao/          # @Entity JPA, JpaRepository, Specifications (filtros dinámicos)
 │   ├── dto/          # Request/Response DTOs, MapStruct mappers
 │   ├── imp/          # Services, Validators, Quartz Jobs (plagio async, JWT cleanup), Redis Services
-│   ├── spec/         # openapi/ (auth-api.yaml, work-api.yaml, plagiarism-api.yaml...)
+│   ├── spec/         # openapi/ contratos fuente de verdad (auth-api, catalog-api, user-api...)
 │   ├── mockup/       # Mocks para testing
 │   └── ws/
 │       ├── auth-service/        # :8081 — JWT, 2FA TOTP, refresh, logout, auto-registro
-│       ├── user-service/        # :8082 — Usuarios, roles, importación CSV padrón
-│       ├── catalog-service/     # :8083 — Facultades, carreras, materias, grupos, fases
+│       ├── catalog-service/     # :8082 — Facultades, carreras, materias, grupos, fases (caché Redis)
+│       ├── user-service/        # :8083 — Usuarios, roles, importación CSV/Excel padrón
 │       ├── work-service/        # :8084 — Trabajos, documentos, hashtags, MinIO
 │       └── plagiarism-service/  # :8085 — Análisis Copyleaks async, ResultadoPlagio
 ├── docker-compose/
@@ -442,12 +469,15 @@ const BACKEND_STRUCT = `proyecto-ws/
 │   └── secrets/      # JWT secret, Copyleaks API key, SMTP password
 └── script/
     ├── Jenkinsfile
+    ├── contratos.sh  # Redocly lint + oasdiff breaking changes
     ├── build.sh
     └── deploy.sh`;
 
 const ANGULAR_STRUCT = `repositorio-digital/
 ├── src/app/
+│   ├── api/                           # GENERADO por ng-openapi-gen (npm run api:gen): auth, catalog, user
 │   ├── core/
+│   │   ├── api/api.providers.ts       # provideApi(): rootUrl común de los clientes generados
 │   │   ├── auth/
 │   │   │   ├── auth.service.ts        # login, logout, 2FA, refresh, primer login
 │   │   │   ├── auth.guard.ts
@@ -461,7 +491,7 @@ const ANGULAR_STRUCT = `repositorio-digital/
 │   │   │   ├── documento.service.ts
 │   │   │   ├── plagio.service.ts
 │   │   │   └── notificacion.service.ts
-│   │   └── models/                    # Interfaces TypeScript (DTOs)
+│   │   └── http/error-message.ts      # ProblemDetail → mensajes y errores por campo
 │   │
 │   ├── shared/
 │   │   ├── components/
@@ -482,7 +512,7 @@ const ANGULAR_STRUCT = `repositorio-digital/
 │   │   │
 │   │   ├── admin/
 │   │   │   ├── usuarios/              # CU2, CU3, CU4, CU5
-│   │   │   ├── importar-padron/       # CU-IMP: upload CSV/Excel + vista previa
+│   │   │   ├── padron/                # CU-IMP: importar CSV/Excel + resumen + listado
 │   │   │   ├── facultades/
 │   │   │   ├── catalogos/             # Materias, semestres, fases, tipos
 │   │   │   ├── configuracion/         # ConfigFacultad + ConfigSMTP
@@ -509,13 +539,13 @@ const ANGULAR_STRUCT = `repositorio-digital/
 
 const ROUTES_TABLE = [
   { path:"/login",                    comp:"LoginComponent",           guard:"—",                                rol:"Público" },
-  { path:"/register",                 comp:"RegisterComponent",        guard:"—",                                rol:"Público" },
+  { path:"/registro",                 comp:"RegistroComponent",        guard:"GuestGuard",                       rol:"Público" },
   { path:"/2fa",                      comp:"TwoFactorComponent",       guard:"—",                                rol:"Público" },
   { path:"/change-password",          comp:"ChangePasswordComponent",  guard:"AuthGuard",                        rol:"Todos" },
   { path:"/admin/usuarios",           comp:"UsuariosListComponent",    guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
-  { path:"/admin/importar-padron",    comp:"ImportarPadronComponent",  guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
-  { path:"/admin/facultades",         comp:"FacultadesComponent",      guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
-  { path:"/admin/catalogos",          comp:"CatalogosComponent",       guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
+  { path:"/admin/padron",             comp:"PadronComponent",          guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
+  { path:"/admin/catalogos/:entidad", comp:"Catálogos (facultades … tipos-trabajo)", guard:"AuthGuard+RoleGuard('ADMIN')", rol:"Admin" },
+  { path:"/perfil/seguridad",         comp:"SeguridadComponent (2FA)", guard:"AuthGuard",                        rol:"Todos" },
   { path:"/admin/configuracion/:id",  comp:"ConfigFacultadComponent",  guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
   { path:"/estudiante/mis-trabajos",  comp:"MisTrabajosComponent",     guard:"AuthGuard+RoleGuard('ESTUDIANTE')", rol:"Estudiante" },
   { path:"/estudiante/nuevo-trabajo", comp:"NuevoTrabajoComponent",    guard:"AuthGuard+RoleGuard('ESTUDIANTE')", rol:"Estudiante" },
@@ -534,10 +564,10 @@ function OverviewSection() {
     { v:"43+",l:"Endpoints API"}, { v:"6",  l:"Capas Redis" },
   ];
   const stack = [
-    { cat:"Backend", items:["Java 17 + Spring Boot 3","Spring Security + JWT + TOTP 2FA","Spring Data JPA + Flyway","PostgreSQL 15 (full-text nativo)","Redis 7 (caché, rate limiting, blacklist JWT, colas, estado plagio)","Quartz Scheduler (plagio async)","Gradle multimodulo","MapStruct + Bean Validation","Apache POI (import CSV/Excel)","Spring Mail (SMTP configurable)"] },
+    { cat:"Backend", items:["Java 25 + Spring Boot 4.1.1","Spring Security + JWT + TOTP 2FA","Spring Data JPA + Flyway","PostgreSQL 15 (full-text nativo)","Redis 7 (caché, rate limiting, blacklist JWT, colas, estado plagio)","Quartz Scheduler (plagio async)","Gradle multimodulo","MapStruct + Bean Validation","OpenAPI 3.0.3 contract-first (test de contrato)","Apache POI (import CSV/Excel)","Spring Mail (SMTP configurable)"] },
     { cat:"Almacenamiento", items:["MinIO (S3-compatible)","Redis 7 (caché L2 + colas de uploads)","URL externa: YouTube, Vimeo, Drive, GitHub, GitLab"] },
-    { cat:"Frontend", items:["Angular 17 Standalone","TypeScript 5","Angular Material / PrimeNG","RxJS + Signals (Angular 17)","Jasmine + Karma","Cypress (E2E)"] },
-    { cat:"Infraestructura", items:["Docker + Docker Compose","Kubernetes + Nginx Ingress","Jenkins CI/CD","OpenAPI 3 / Swagger UI","Copyleaks API (detección plagio)","Redis 7 (contenedor adicional en docker-compose y K8s)"] },
+    { cat:"Frontend", items:["Angular 22 Standalone + zoneless","TypeScript 5","CSS propio (sin librería UI)","RxJS + Signals","Cliente generado con ng-openapi-gen","Vitest","Cypress (E2E)"] },
+    { cat:"Infraestructura", items:["Docker + Docker Compose","Kubernetes + Nginx Ingress","Jenkins CI/CD","Prism (mocks de contrato) + Redocly + oasdiff","Copyleaks API (detección plagio)","Redis 7 (contenedor adicional en docker-compose y K8s)"] },
   ];
   return (
     <div>
@@ -565,11 +595,12 @@ function OverviewSection() {
         <h3 style={{ marginTop:0, color:C.primary, fontSize:15 }}>Redis 7 — Casos de Uso en el Sistema</h3>
         {[
           { key:"Rate Limiting uploads",       ns:"work:rate:upload:{usuarioId}",    desc:"INCR + TTL 60s. HTTP 429 si supera límite. Protege MinIO en picos de cierre de semestre." },
-          { key:"Blacklist JWT",               ns:"auth:blacklist:{jti}",            desc:"SET EX {expiracion}. Logout real e invalidación inmediata al cambiar contraseña." },
-          { key:"Caché catálogos",             ns:"catalog:cache:{entidad}:{id}",   desc:"TTL 10 min. Materias, semestres, carreras. Hit → <5ms. Reduce carga PostgreSQL." },
+          { key:"Blacklist JWT ✅",            ns:"auth:blacklist:{jti}",            desc:"SET EX {vida restante}. Logout real y rotación de refresh tokens." },
+          { key:"Revocación por usuario ✅",   ns:"auth:revocado-desde:{idUsuario}", desc:"Epoch ms, TTL 7 d. Invalida todos los tokens previos (cambio/reset de contraseña, cambio de rol, desactivación)." },
+          { key:"Caché catálogos ✅",          ns:"catalog:cache:{entidad}:todas|facultad:{id}", desc:"TTL 10 min + SET índice para invalidar. Hit → <5ms. Si Redis falla → PostgreSQL." },
           { key:"Cola de uploads",             ns:"work:queue:uploads:{facultad}",   desc:"LPUSH / BRPOP. Buffer ante subidas masivas simultáneas. N workers en paralelo." },
           { key:"Estado análisis plagio",      ns:"plagio:status:{idTrabajo}",       desc:"SET EX 600. Angular polling cada 5s sin hit a BD durante el análisis Copyleaks." },
-          { key:"Sesión 2FA pendiente",        ns:"auth:2fa:pending:{usuarioId}",    desc:"SET EX 300. Guarda TOTP temporal mientras el usuario completa la verificación." },
+          { key:"Sesión 2FA pendiente ✅",     ns:"auth:2fa:pending:{tokenTemporal}", desc:"SET EX 300 → idUsuario. Token aleatorio (no el id) + auth:2fa:intentos:{tokenTemporal} (máx. 5)." },
         ].map(r=>(
           <div key={r.key} style={{ display:"grid", gridTemplateColumns:"160px 280px 1fr", gap:12, padding:"9px 0", borderBottom:`1px solid ${C.bg}`, alignItems:"start" }}>
             <span style={{ fontWeight:700, color:"#BE123C", fontSize:12 }}>{r.key}</span>
@@ -655,8 +686,8 @@ function EntitiesSection() {
 function ArchSection() {
   const svcs = [
     { n:"auth-service",       p:8081, d:"JWT, 2FA TOTP, refresh, auto-registro",    c:"#5B21B6" },
-    { n:"user-service",       p:8082, d:"Usuarios, roles, padrón CSV/Excel, SMTP",  c:"#1B3A6B" },
-    { n:"catalog-service",    p:8083, d:"Facultades, carreras, materias, grupos",   c:"#065F46" },
+    { n:"catalog-service",    p:8082, d:"Facultades, carreras, materias, grupos (caché Redis)", c:"#065F46" },
+    { n:"user-service",       p:8083, d:"Usuarios, roles, padrón CSV/Excel, SMTP",  c:"#1B3A6B" },
     { n:"work-service",       p:8084, d:"Trabajos, documentos, MinIO, Redis queue/rate", c:"#92400E" },
     { n:"plagiarism-service", p:8085, d:"Copyleaks API async, ResultadoPlagio",     c:"#991B1B" },
   ];
@@ -666,7 +697,7 @@ function ArchSection() {
       <Card>
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
           <div style={{ background:C.purpleBg, border:`2px solid ${C.purple}`, borderRadius:8, padding:"12px 20px", textAlign:"center" }}>
-            <span style={{ fontWeight:700, color:C.purple }}>Cliente Angular 17 (SPA Standalone)</span>
+            <span style={{ fontWeight:700, color:C.purple }}>Cliente Angular 22 (SPA Standalone)</span>
             <span style={{ color:C.purple, marginLeft:12, fontSize:12 }}>HTTP/S + JWT Bearer</span>
           </div>
           <div style={{ textAlign:"center", color:C.muted }}>↓</div>
@@ -730,7 +761,7 @@ function ApiSection() {
         <Card key={g.group}>
           <h3 style={{ marginTop:0, color:g.color, fontSize:15, borderBottom:`2px solid ${g.color}`, paddingBottom:8 }}>{g.group}</h3>
           {g.endpoints.map(e=>(
-            <div key={e.p} style={{ display:"flex", alignItems:"center", gap:12, padding:"7px 0", borderBottom:`1px solid ${C.bg}` }}>
+            <div key={e.m+e.p} style={{ display:"flex", alignItems:"center", gap:12, padding:"7px 0", borderBottom:`1px solid ${C.bg}` }}>
               <MethodBadge m={e.m} />
               <code style={{ fontSize:12, color:C.text, flex:1 }}>{e.p}</code>
               <span style={{ fontSize:12, color:C.muted, maxWidth:300, textAlign:"right" }}>{e.d}</span>
@@ -820,7 +851,7 @@ function SprintsSection() {
 function FrontendSection() {
   return (
     <div>
-      <SectionHeader title="Frontend Angular 17 — Standalone" subtitle="Lazy loading por rol · Guards · 2FA · Notificaciones · Importación padrón" />
+      <SectionHeader title="Frontend Angular 22 — Standalone" subtitle="Lazy loading por rol · Guards · 2FA · Notificaciones · Importación padrón" />
       <Card><Code>{ANGULAR_STRUCT}</Code></Card>
       <Card>
         <h3 style={{ marginTop:0, color:C.primary, fontSize:15 }}>Tabla de Rutas</h3>
