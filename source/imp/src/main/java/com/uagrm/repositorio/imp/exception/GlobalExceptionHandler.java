@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -33,6 +34,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleNegocio(NegocioException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         problem.setTitle(ex.getTitle());
+        return conTimestamp(problem);
+    }
+
+    /**
+     * Red de seguridad para duplicados que llegan a la BD (dos requests simultaneos pasan la validacion previa
+     * y la restriccion UNIQUE rechaza al segundo). No se expone el mensaje de PostgreSQL.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleIntegridad(DataIntegrityViolationException ex) {
+        log.warn("Violacion de integridad: {}", ex.getMostSpecificCause().getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
+                "El registro entra en conflicto con otro existente o esta en uso.");
+        problem.setTitle("Conflicto");
         return conTimestamp(problem);
     }
 

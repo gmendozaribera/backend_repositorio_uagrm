@@ -22,8 +22,11 @@ El `java` del PATH es 1.8; Gradle necesita el JDK 25:
 export JAVA_HOME="$HOME/.jdks/openjdk-25.0.2"
 docker compose -f docker-compose/dev/docker-compose.yml up -d      # PostgreSQL 15, Redis 7, MinIO
 ./gradlew build                                                    # compila + tests
-SPRING_PROFILES_ACTIVE=dev ./gradlew :auth-service:bootRun         # :8081, admin / Admin2026.
+SPRING_PROFILES_ACTIVE=dev ./gradlew :auth-service:bootRun         # :8081, admin / Admin2026. (aplica Flyway)
+SPRING_PROFILES_ACTIVE=dev ./gradlew :catalog-service:bootRun      # :8082, arrancar DESPUES de auth-service
 ```
+Migraciones: viven en `source/dao` y las aplica SOLO auth-service; los demas servicios no traen Flyway y
+validan el esquema (`ddl-auto: validate`). En docker-compose, catalog-service espera el healthcheck de auth-service.
 
 ## Estructura
 - `source/dao` — entidades JPA, repositorios, migraciones Flyway (`src/main/resources/db/migration`)
@@ -38,7 +41,8 @@ Todo cambio de API empieza editando el YAML; después el código.
 - **Backend:** NO genera código. Lo verifica `<Servicio>ContratoTest` (`@WebMvcTest` + `openapi-request-validator-mockmvc`):
   cada request/response real se valida contra el YAML; propiedades no declaradas fallan.
 - **Frontend:** genera modelos y cliente con `ng-openapi-gen` desde el YAML (nunca escribir interfaces a mano).
-- **Mock:** `docker compose -f docker-compose/dev/docker-compose.yml --profile mock up -d contrato-mock` → Prism en :4010.
+- **Mock:** `docker compose -f docker-compose/dev/docker-compose.yml --profile mock up -d contrato-mock` → Prism en :4010
+  (auth); `contrato-mock-catalog` → :4011 (catalog).
 - **Control de cambios:** `script/contratos.sh` (Redocly lint + oasdiff contra `origin/main`). Un breaking change
   falla el build salvo que se suba la versión MAYOR de `info.version`. Corre en la etapa `Contratos` de Jenkins.
 - Envoltorios planos por tipo (`RespuestaTokens`, `RespuestaLogin`...): 3.0 no tiene genéricos y `allOf` rompe la

@@ -3,6 +3,8 @@
 apis:
   auth:
     root: source/spec/src/main/resources/openapi/auth-api.yaml
+  catalog:
+    root: source/spec/src/main/resources/openapi/catalog-api.yaml
 
 extends:
   - recommended

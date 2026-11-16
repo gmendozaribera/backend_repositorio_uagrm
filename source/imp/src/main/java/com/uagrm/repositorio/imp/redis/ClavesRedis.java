@@ -6,8 +6,25 @@ package com.uagrm.repositorio.imp.redis;
 public final class ClavesRedis {
 
     private static final String AUTH = "auth:";
+    private static final String CATALOGO = "catalog:cache:";
 
     private ClavesRedis() {
+    }
+
+    /**
+     * catalog:cache:{entidad}:todas o catalog:cache:{entidad}:facultad:{idFacultad} → JSON del listado de activos.
+     * TTL: app.catalogo.cache.ttl (600 s).
+     */
+    public static String catalogo(String entidad, Integer idFacultad) {
+        return CATALOGO + entidad + ":" + (idFacultad == null ? "todas" : "facultad:" + idFacultad);
+    }
+
+    /**
+     * catalog:cache:{entidad}:indice → SET con las keys de listados cacheados de esa entidad.
+     * Permite invalidar sin KEYS ni SCAN. TTL: el mismo de la cache (se renueva en cada escritura).
+     */
+    public static String catalogoIndice(String entidad) {
+        return CATALOGO + entidad + ":indice";
     }
 
     /** auth:blacklist:{jti} → "revoked". TTL: vida restante del token. */

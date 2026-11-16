@@ -61,8 +61,35 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
     ports:
       - "8081:8081"
+    # auth-service es el unico que aplica las migraciones Flyway: los demas servicios esperan a que este listo
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 10
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  catalog-service:
+    profiles: ["services"]
+    build:
+      context: ../../source/ws/catalog-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-repositorio}
+      DB_USERNAME: ${POSTGRES_USER:-repositorio}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-repositorio}
+      SPRING_PROFILES_ACTIVE: dev
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
+    ports:
+      - "8082:8082"
+    depends_on:
+      # ddl-auto=validate: necesita el esquema ya migrado por auth-service
+      auth-service:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -70,6 +97,7 @@ services:
   # Mock del contrato para desarrollo en paralelo: responde segun los ejemplos de auth-api.yaml
   # y rechaza requests que no cumplen el contrato.
   #   docker compose --profile mock up -d contrato-mock   ->  http://localhost:4010/api/v1/auth/login
+#   (catalog-api.yaml: servicio contrato-mock-catalog en :4011)
   # Header "Prefer: example=conDosFactores" elige un ejemplo; "Prefer: code=401" fuerza un error.
   contrato-mock:
     profiles: ["mock"]
@@ -79,6 +107,16 @@ services:
       - ../../source/spec/src/main/resources/openapi:/contratos:ro
     ports:
       - "4010:4010"
+
+  # Igual que contrato-mock, para catalog-api.yaml:  http://localhost:4011/api/v1/facultades
+  contrato-mock-catalog:
+    profiles: ["mock"]
+    image: stoplight/prism:5.12.0
+    command: ["mock", "-h", "0.0.0.0", "/contratos/catalog-api.yaml"]
+    volumes:
+      - ../../source/spec/src/main/resources/openapi:/contratos:ro
+    ports:
+      - "4011:4010"
 
 volumes:
   postgres-data:

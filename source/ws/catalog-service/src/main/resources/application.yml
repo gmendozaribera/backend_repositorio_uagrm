@@ -1,0 +1,64 @@
+# Todos los valores sensibles o dependientes del entorno se sobreescriben con variables
+# de entorno (docker-compose / ConfigMap y Secret de Kubernetes).
+# Para desarrollo local: SPRING_PROFILES_ACTIVE=dev (ver application-dev.yml).
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: catalog-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/repositorio}
+    username: ${DB_USERNAME:repositorio}
+    password: ${DB_PASSWORD:repositorio}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # el esquema lo maneja exclusivamente Flyway
+
+  # Las migraciones las aplica SOLO auth-service (este modulo no incluye Flyway).
+  # catalog-service debe arrancar despues de que auth-service migro la BD.
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Tiempos cortos: la verificacion de sesion responde 503 rapido y la cache degrada rapido a PostgreSQL
+      timeout: 2s
+      connect-timeout: 2s
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+app:
+  # Mismos valores que auth-service: este servicio valida los tokens que emite auth-service
+  # (misma clave HS256 y mismo emisor). Los TTL y dos-factores solo los exige la configuracion compartida.
+  seguridad:
+    jwt:
+      secreto: ${JWT_SECRET}             # obligatorio: el MISMO secreto que auth-service. Nunca en el repo.
+      emisor: repositorio-uagrm
+      access-ttl-por-defecto: 1h
+      refresh-ttl: 7d
+    dos-factores:
+      emisor: Repositorio UAGRM
+      ttl-pendiente: 300s
+      max-intentos: 5
+    cors-origenes: ${CORS_ORIGENES:http://localhost:4200}
+
+  catalogo:
+    cache:
+      ttl: ${CATALOGO_CACHE_TTL:600s}    # keys catalog:cache:{entidad}:{filtro}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness y /readiness para Kubernetes

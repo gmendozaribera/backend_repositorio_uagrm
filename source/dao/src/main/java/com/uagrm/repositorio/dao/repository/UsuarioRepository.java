@@ -12,4 +12,8 @@ public interface UsuarioRepository extends JpaRepository<Usuario, Integer> {
     Optional<Usuario> findByUsuario(String usuario);
 
     boolean existsByUsuario(String usuario);
+
+    /** Asignacion de docentes: valida el rol y devuelve los datos de la persona en una sola consulta. */
+    @EntityGraph(attributePaths = {"tipoUsuario", "persona"})
+    Optional<Usuario> findConRolByIdUsuario(Integer idUsuario);
 }

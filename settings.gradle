@@ -11,3 +11,6 @@ project(':mockup').projectDir = file('source/mockup')
 // Microservicios (se agregan por Sprint)
 include 'auth-service'
 project(':auth-service').projectDir = file('source/ws/auth-service')
+
+include 'catalog-service'
+project(':catalog-service').projectDir = file('source/ws/catalog-service')

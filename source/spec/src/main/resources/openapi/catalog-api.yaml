@@ -1,0 +1,1646 @@
+openapi: 3.0.3
+info:
+  title: Repositorio Digital UAGRM - catalog-service
+  version: 1.1.0
+  description: |
+    Catalogos academicos por facultad: facultades, carreras, materias, semestres, grupos (con sus docentes),
+    fases y tipos de trabajo.
+
+    **Contrato fuente de verdad.** El backend lo verifica con tests de contrato
+    (`CatalogContratoTest`) y el frontend genera su cliente TypeScript desde este archivo.
+    Todo cambio pasa por aqui primero; los cambios incompatibles requieren subir la version mayor.
+
+    Reglas generales:
+    - **Lecturas (GET):** cualquier usuario autenticado (ADMIN, DOCENTE, ESTUDIANTE).
+    - **Escrituras (POST, PUT, DELETE):** solo ADMIN.
+    - **Sin borrado fisico:** `DELETE` desactiva (`estado = 0`) y devuelve el registro desactivado.
+      Para reactivar se envia `estado: 1` en el `PUT`.
+    - **Listados:** por defecto solo registros activos; `incluirInactivos=true` devuelve todos
+      (pensado para las pantallas de administracion). Los listados no se paginan (catalogos chicos).
+    - **`estado` en los requests es opcional:** en `POST` por defecto es 1 (activo); en `PUT`, si no se
+      envia, se conserva el valor actual.
+    - **Normalizacion:** las siglas se guardan sin espacios y en MAYUSCULAS (`inf ` -> `INF`); los nombres sin
+      espacios al inicio/fin. El `DELETE` de un docente de grupo (`/grupos/{id}/docentes/{idUsuario}`) si es fisico.
+    - Los listados de facultades, carreras, materias, semestres, fases y tipos de trabajo se sirven desde
+      cache (hasta 10 minutos); toda escritura invalida la cache de esa entidad al instante.
+
+    Formato de respuestas:
+    - Exito: `{ data, message, status, timestamp }`
+    - Error: `ProblemDetail` (RFC 7807) con `timestamp`; en validaciones incluye `errores` (campo -> mensaje).
+  contact:
+    name: Equipo Repositorio Digital FICCT
+  license:
+    name: Uso academico UAGRM
+    url: https://www.uagrm.edu.bo
+servers:
+  - url: http://localhost:8082
+    description: Desarrollo local
+tags:
+  - name: Facultades
+    description: Facultades de la universidad (raiz de todos los catalogos)
+  - name: Carreras
+    description: Carreras de cada facultad
+  - name: Materias
+    description: Materias ofrecidas por cada facultad
+  - name: Semestres
+    description: Periodos academicos (numero de periodo + anio) de cada facultad
+  - name: Grupos
+    description: Grupos de una materia en un semestre y los docentes asignados a cada grupo
+  - name: Fases
+    description: Fases de entrega de un trabajo (perfil, avance, final...) definidas por cada facultad
+  - name: TiposTrabajo
+    description: Tipos de trabajo (proyecto, tesis, monografia...) definidos por cada facultad
+
+paths:
+  # ---------------------------------------------------------------- Facultades
+  /api/v1/facultades:
+    get:
+      tags: [Facultades]
+      operationId: listarFacultades
+      summary: Listar facultades
+      parameters:
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Facultades ordenadas por nombre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaFacultades'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Facultades]
+      operationId: crearFacultad
+      summary: Crear facultad (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FacultadRequest'
+      responses:
+        '201':
+          description: Facultad creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFacultad'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/facultades/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Facultades]
+      operationId: actualizarFacultad
+      summary: Actualizar facultad (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FacultadRequest'
+      responses:
+        '200':
+          description: Facultad actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFacultad'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Facultades]
+      operationId: desactivarFacultad
+      summary: Desactivar facultad (ADMIN)
+      description: Borrado logico (`estado = 0`). Sus carreras, materias, etc. no se desactivan en cascada.
+      responses:
+        '200':
+          description: Facultad desactivada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFacultad'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Carreras
+  /api/v1/carreras:
+    get:
+      tags: [Carreras]
+      operationId: listarCarreras
+      summary: Listar carreras
+      parameters:
+        - $ref: '#/components/parameters/IdFacultadFiltro'
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Carreras ordenadas por nombre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaCarreras'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Carreras]
+      operationId: crearCarrera
+      summary: Crear carrera (ADMIN)
+      description: La sigla es unica en todo el sistema (la usa el padron de estudiantes).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarreraRequest'
+      responses:
+        '201':
+          description: Carrera creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaCarrera'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/carreras/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Carreras]
+      operationId: actualizarCarrera
+      summary: Actualizar carrera (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarreraRequest'
+      responses:
+        '200':
+          description: Carrera actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaCarrera'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Carreras]
+      operationId: desactivarCarrera
+      summary: Desactivar carrera (ADMIN)
+      responses:
+        '200':
+          description: Carrera desactivada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaCarrera'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Materias
+  /api/v1/materias:
+    get:
+      tags: [Materias]
+      operationId: listarMaterias
+      summary: Listar materias
+      parameters:
+        - $ref: '#/components/parameters/IdFacultadFiltro'
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Materias ordenadas por sigla
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaMaterias'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Materias]
+      operationId: crearMateria
+      summary: Crear materia (ADMIN)
+      description: La sigla es unica dentro de la facultad.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MateriaRequest'
+      responses:
+        '201':
+          description: Materia creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMateria'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/materias/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Materias]
+      operationId: actualizarMateria
+      summary: Actualizar materia (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MateriaRequest'
+      responses:
+        '200':
+          description: Materia actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMateria'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Materias]
+      operationId: desactivarMateria
+      summary: Desactivar materia (ADMIN)
+      responses:
+        '200':
+          description: Materia desactivada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaMateria'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Semestres
+  /api/v1/semestres:
+    get:
+      tags: [Semestres]
+      operationId: listarSemestres
+      summary: Listar semestres
+      parameters:
+        - $ref: '#/components/parameters/IdFacultadFiltro'
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Semestres del mas reciente al mas antiguo (anio y periodo descendentes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaSemestres'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Semestres]
+      operationId: crearSemestre
+      summary: Crear semestre (ADMIN)
+      description: La combinacion facultad + anio + semestre es unica.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SemestreRequest'
+      responses:
+        '201':
+          description: Semestre creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaSemestre'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/semestres/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Semestres]
+      operationId: actualizarSemestre
+      summary: Actualizar semestre (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SemestreRequest'
+      responses:
+        '200':
+          description: Semestre actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaSemestre'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Semestres]
+      operationId: desactivarSemestre
+      summary: Desactivar semestre (ADMIN)
+      responses:
+        '200':
+          description: Semestre desactivado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaSemestre'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Grupos
+  /api/v1/grupos:
+    get:
+      tags: [Grupos]
+      operationId: listarGrupos
+      summary: Listar grupos
+      description: Los filtros se combinan (facultad Y materia Y semestre). Este listado no se cachea.
+      parameters:
+        - name: idFacultad
+          in: query
+          required: false
+          description: Solo los grupos cuya materia pertenece a esta facultad.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idMateria
+          in: query
+          required: false
+          description: Solo los grupos de esta materia.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idSemestre
+          in: query
+          required: false
+          description: Solo los grupos de este semestre.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Grupos ordenados por nombre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaGrupos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Grupos]
+      operationId: crearGrupo
+      summary: Crear grupo (ADMIN)
+      description: |
+        La materia y el semestre deben ser de la misma facultad. El nombre es unico por materia + semestre.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrupoRequest'
+      responses:
+        '201':
+          description: Grupo creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaGrupo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/grupos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Grupos]
+      operationId: actualizarGrupo
+      summary: Actualizar grupo (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrupoRequest'
+      responses:
+        '200':
+          description: Grupo actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaGrupo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Grupos]
+      operationId: desactivarGrupo
+      summary: Desactivar grupo (ADMIN)
+      description: Borrado logico. Las asignaciones de docentes se conservan.
+      responses:
+        '200':
+          description: Grupo desactivado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaGrupo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/grupos/{id}/docentes:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Grupos]
+      operationId: listarDocentesGrupo
+      summary: Listar docentes asignados al grupo
+      responses:
+        '200':
+          description: Docentes del grupo ordenados por apellidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaDocentesGrupo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Grupos]
+      operationId: asignarDocenteGrupo
+      summary: Asignar docente al grupo (ADMIN)
+      description: |
+        El usuario debe existir, estar activo y tener rol DOCENTE. Con `esAdminCurso = true` el docente
+        es Administrador de Curso de ese grupo (puede serlo de varios grupos a la vez).
+        Si el docente ya esta asignado devuelve 409; para cambiar `esAdminCurso` se usa el PATCH de la asignacion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AsignarDocenteRequest'
+      responses:
+        '201':
+          description: Docente asignado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDocenteGrupo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/grupos/{id}/docentes/{idUsuario}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: idUsuario
+        in: path
+        required: true
+        description: Id del usuario docente.
+        schema:
+          type: integer
+          format: int32
+          minimum: 1
+    delete:
+      tags: [Grupos]
+      operationId: quitarDocenteGrupo
+      summary: Quitar docente del grupo (ADMIN)
+      description: Elimina la asignacion (es una relacion, no un catalogo, por eso el borrado es fisico).
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    patch:
+      tags: [Grupos]
+      operationId: actualizarDocenteGrupo
+      summary: Cambiar si el docente es Administrador de Curso del grupo (ADMIN)
+      description: Solo modifica `esAdminCurso` de una asignacion existente; 404 si el docente no esta asignado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarDocenteGrupoRequest'
+      responses:
+        '200':
+          description: Asignacion actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDocenteGrupo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Fases
+  /api/v1/fases:
+    get:
+      tags: [Fases]
+      operationId: listarFases
+      summary: Listar fases
+      parameters:
+        - $ref: '#/components/parameters/IdFacultadFiltro'
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Fases en orden de creacion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaFases'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Fases]
+      operationId: crearFase
+      summary: Crear fase (ADMIN)
+      description: El nombre es unico dentro de la facultad.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaseRequest'
+      responses:
+        '201':
+          description: Fase creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFase'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/fases/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Fases]
+      operationId: actualizarFase
+      summary: Actualizar fase (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaseRequest'
+      responses:
+        '200':
+          description: Fase actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFase'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Fases]
+      operationId: desactivarFase
+      summary: Desactivar fase (ADMIN)
+      responses:
+        '200':
+          description: Fase desactivada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFase'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Tipos de trabajo
+  /api/v1/tipos-trabajo:
+    get:
+      tags: [TiposTrabajo]
+      operationId: listarTiposTrabajo
+      summary: Listar tipos de trabajo
+      parameters:
+        - $ref: '#/components/parameters/IdFacultadFiltro'
+        - $ref: '#/components/parameters/IncluirInactivos'
+      responses:
+        '200':
+          description: Tipos de trabajo ordenados por nombre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaTiposTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [TiposTrabajo]
+      operationId: crearTipoTrabajo
+      summary: Crear tipo de trabajo (ADMIN)
+      description: El nombre es unico dentro de la facultad.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TipoTrabajoRequest'
+      responses:
+        '201':
+          description: Tipo de trabajo creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTipoTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/tipos-trabajo/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [TiposTrabajo]
+      operationId: actualizarTipoTrabajo
+      summary: Actualizar tipo de trabajo (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TipoTrabajoRequest'
+      responses:
+        '200':
+          description: Tipo de trabajo actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTipoTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [TiposTrabajo]
+      operationId: desactivarTipoTrabajo
+      summary: Desactivar tipo de trabajo (ADMIN)
+      responses:
+        '200':
+          description: Tipo de trabajo desactivado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTipoTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token emitido por auth-service (login, 2fa/verify, refresh o password/change).
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Id del registro.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    IdFacultadFiltro:
+      name: idFacultad
+      in: query
+      required: false
+      description: Solo los registros de esta facultad. Sin el filtro se listan los de todas las facultades.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    IncluirInactivos:
+      name: incluirInactivos
+      in: query
+      required: false
+      description: Si es true tambien devuelve los registros desactivados (pantallas de administracion).
+      schema:
+        type: boolean
+        default: false
+
+  responses:
+    SinDatos:
+      description: Operacion realizada (data es null)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RespuestaSinDatos'
+    DatosInvalidos:
+      description: Cuerpo o parametros invalidos, o regla de negocio incumplida
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 400
+            title: Datos invalidos
+            detail: Uno o mas campos no son validos.
+            instance: /api/v1/carreras
+            timestamp: '2026-11-12T14:00:00Z'
+            errores:
+              sigla: no debe estar vacio
+    NoAutenticado:
+      description: Token ausente, invalido, expirado o sesion cerrada
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 401
+            title: No autenticado
+            detail: Token ausente, invalido o expirado.
+            instance: /api/v1/carreras
+            timestamp: '2026-11-12T14:00:00Z'
+    AccesoDenegado:
+      description: Rol sin permiso (las escrituras son solo ADMIN) o contrasena pendiente de cambio
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 403
+            title: Acceso denegado
+            detail: No tiene permisos para realizar esta accion.
+            instance: /api/v1/carreras
+            timestamp: '2026-11-12T14:00:00Z'
+    NoEncontrado:
+      description: El registro indicado (o uno referenciado en el cuerpo) no existe
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 404
+            title: Recurso no encontrado
+            detail: No existe la facultad 99.
+            instance: /api/v1/carreras
+            timestamp: '2026-11-12T14:00:00Z'
+    Conflicto:
+      description: Duplicado (sigla, nombre, semestre, asignacion) o referencia a un registro inactivo
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 409
+            title: Conflicto
+            detail: Ya existe una carrera con la sigla INF.
+            instance: /api/v1/carreras
+            timestamp: '2026-11-12T14:00:00Z'
+    ServicioNoDisponible:
+      description: |
+        No se pudo verificar la sesion (Redis no responde); por seguridad se rechaza la operacion.
+        La cache de catalogos, en cambio, no provoca 503: si falla se consulta directo la base de datos.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+
+  schemas:
+    # ---------- Comunes ----------
+    Estado:
+      type: integer
+      format: int32
+      enum: [0, 1]
+      description: 1 = activo, 0 = inactivo (desactivado).
+      example: 1
+    EstadoOpcional:
+      type: integer
+      format: int32
+      enum: [0, 1]
+      description: Opcional (omitir el campo, no enviar null). En POST por defecto 1; en PUT, si no se envia, se conserva el valor actual.
+      example: 1
+    Id:
+      type: integer
+      format: int32
+      minimum: 1
+      example: 1
+
+    # ---------- Requests ----------
+    FacultadRequest:
+      type: object
+      required: [nombre, sigla]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Facultad de Ingenieria en Ciencias de la Computacion y Telecomunicaciones
+        sigla:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: FICCT
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    CarreraRequest:
+      type: object
+      required: [nombre, sigla, idFacultad]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Ingenieria Informatica
+        sigla:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: INF
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    MateriaRequest:
+      type: object
+      required: [nombre, sigla, idFacultad]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 150
+          example: Ingenieria de Software I
+        sigla:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: INF412
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    SemestreRequest:
+      type: object
+      required: [semestre, anio, idFacultad]
+      properties:
+        semestre:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 4
+          description: Numero de periodo dentro del anio (1 y 2 regulares; 3 y 4 para periodos especiales).
+          example: 2
+        anio:
+          type: integer
+          format: int32
+          minimum: 2000
+          maximum: 2100
+          example: 2026
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    GrupoRequest:
+      type: object
+      required: [nombre, idMateria, idSemestre]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: SA
+        idMateria:
+          $ref: '#/components/schemas/Id'
+        idSemestre:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    AsignarDocenteRequest:
+      type: object
+      required: [idUsuario, esAdminCurso]
+      properties:
+        idUsuario:
+          $ref: '#/components/schemas/Id'
+        esAdminCurso:
+          type: boolean
+          description: true si el docente sera Administrador de Curso de este grupo.
+          example: false
+    ActualizarDocenteGrupoRequest:
+      type: object
+      required: [esAdminCurso]
+      properties:
+        esAdminCurso:
+          type: boolean
+          description: true si el docente pasa a ser Administrador de Curso de este grupo.
+          example: true
+    FaseRequest:
+      type: object
+      required: [nombre, idFacultad]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Perfil
+        descripcion:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: Propuesta inicial del trabajo
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    TipoTrabajoRequest:
+      type: object
+      required: [nombre, idFacultad]
+      properties:
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Proyecto de grado
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+
+    # ---------- Datos ----------
+    Facultad:
+      type: object
+      required: [idFacultad, nombre, sigla, estado]
+      properties:
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: Facultad de Ingenieria en Ciencias de la Computacion y Telecomunicaciones
+        sigla:
+          type: string
+          example: FICCT
+        estado:
+          $ref: '#/components/schemas/Estado'
+    Carrera:
+      type: object
+      required: [idCarrera, nombre, sigla, idFacultad, estado]
+      properties:
+        idCarrera:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: Ingenieria Informatica
+        sigla:
+          type: string
+          example: INF
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/Estado'
+    Materia:
+      type: object
+      required: [idMateria, nombre, sigla, idFacultad, estado]
+      properties:
+        idMateria:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: Ingenieria de Software I
+        sigla:
+          type: string
+          example: INF412
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/Estado'
+    Semestre:
+      type: object
+      required: [idSemestre, semestre, anio, idFacultad, estado]
+      properties:
+        idSemestre:
+          $ref: '#/components/schemas/Id'
+        semestre:
+          type: integer
+          format: int32
+          example: 2
+        anio:
+          type: integer
+          format: int32
+          example: 2026
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/Estado'
+    Grupo:
+      type: object
+      required: [idGrupo, nombre, idMateria, idSemestre, estado]
+      properties:
+        idGrupo:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: SA
+        idMateria:
+          $ref: '#/components/schemas/Id'
+        idSemestre:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/Estado'
+    DocenteGrupo:
+      type: object
+      required: [idGrupo, idUsuario, usuario, nombre, apellidos, esAdminCurso]
+      properties:
+        idGrupo:
+          $ref: '#/components/schemas/Id'
+        idUsuario:
+          $ref: '#/components/schemas/Id'
+        usuario:
+          type: string
+          example: doc.maria
+        nombre:
+          type: string
+          example: Maria
+        apellidos:
+          type: string
+          example: Lopez Suarez
+        esAdminCurso:
+          type: boolean
+          example: true
+    Fase:
+      type: object
+      required: [idFase, nombre, descripcion, idFacultad, estado]
+      properties:
+        idFase:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: Perfil
+        descripcion:
+          type: string
+          nullable: true
+          example: Propuesta inicial del trabajo
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/Estado'
+    TipoTrabajo:
+      type: object
+      required: [idTipoTrabajo, nombre, idFacultad, estado]
+      properties:
+        idTipoTrabajo:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: Proyecto de grado
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        estado:
+          $ref: '#/components/schemas/Estado'
+
+    # ---------- Envoltorios ApiResponse<T> ----------
+    # OpenAPI 3.0 no tiene genericos: un esquema plano por cada tipo de data.
+    RespuestaFacultad:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Facultad'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaFacultades:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Facultad'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaCarrera:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Carrera'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaCarreras:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Carrera'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaMateria:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Materia'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaMaterias:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Materia'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaSemestre:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Semestre'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaSemestres:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Semestre'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaGrupo:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Grupo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaGrupos:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Grupo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaDocenteGrupo:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/DocenteGrupo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaDocentesGrupo:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocenteGrupo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaFase:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Fase'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaFases:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fase'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaTipoTrabajo:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/TipoTrabajo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaTiposTrabajo:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TipoTrabajo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaSinDatos:
+      type: object
+      description: Operaciones sin resultado; data siempre es null.
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: object
+          nullable: true
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---------- Errores ----------
+    ProblemDetail:
+      type: object
+      required: [status, title, timestamp]
+      properties:
+        type:
+          type: string
+        status:
+          type: integer
+          format: int32
+        title:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        errores:
+          type: object
+          description: Solo en errores de validacion; campo -> mensaje.
+          additionalProperties:
+            type: string
