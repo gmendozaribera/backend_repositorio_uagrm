@@ -35,6 +35,8 @@ subprojects {
         lombokMapstructBindingVersion = '0.2.0'
         totpVersion = '1.7.1'
         openapiValidatorVersion = '3.0.0'
+        commonsCsvVersion = '1.14.1'
+        poiVersion = '5.5.1'
     }
 
     dependencies {

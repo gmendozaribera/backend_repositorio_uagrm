@@ -94,10 +94,30 @@ services:
       redis:
         condition: service_healthy
 
+  user-service:
+    profiles: ["services"]
+    build:
+      context: ../../source/ws/user-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-repositorio}
+      DB_USERNAME: ${POSTGRES_USER:-repositorio}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-repositorio}
+      SPRING_PROFILES_ACTIVE: dev
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
+    ports:
+      - "8083:8083"
+    depends_on:
+      # ddl-auto=validate: necesita el esquema ya migrado por auth-service
+      auth-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   # Mock del contrato para desarrollo en paralelo: responde segun los ejemplos de auth-api.yaml
   # y rechaza requests que no cumplen el contrato.
   #   docker compose --profile mock up -d contrato-mock   ->  http://localhost:4010/api/v1/auth/login
-#   (catalog-api.yaml: servicio contrato-mock-catalog en :4011)
+  #   (catalog-api.yaml: contrato-mock-catalog en :4011; user-api.yaml: contrato-mock-user en :4012)
   # Header "Prefer: example=conDosFactores" elige un ejemplo; "Prefer: code=401" fuerza un error.
   contrato-mock:
     profiles: ["mock"]
@@ -117,6 +137,16 @@ services:
       - ../../source/spec/src/main/resources/openapi:/contratos:ro
     ports:
       - "4011:4010"
+
+  # Igual que contrato-mock, para user-api.yaml:  http://localhost:4012/api/v1/usuarios
+  contrato-mock-user:
+    profiles: ["mock"]
+    image: stoplight/prism:5.12.0
+    command: ["mock", "-h", "0.0.0.0", "/contratos/user-api.yaml"]
+    volumes:
+      - ../../source/spec/src/main/resources/openapi:/contratos:ro
+    ports:
+      - "4012:4010"
 
 volumes:
   postgres-data:

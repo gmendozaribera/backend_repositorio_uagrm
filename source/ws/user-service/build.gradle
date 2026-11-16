@@ -1,0 +1,25 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+description = 'user-service :8083 — usuarios, roles y padron estudiantil (importacion CSV/Excel)'
+
+dependencies {
+    implementation project(':imp')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Sin Flyway a proposito: las migraciones (source/dao) las aplica solo auth-service.
+    // Este servicio arranca con ddl-auto=validate sobre el esquema ya migrado.
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation project(':mockup')
+    // Tests de contrato: cada request/response se valida contra spec/openapi/user-api.yaml
+    testImplementation project(':spec')
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation "com.atlassian.oai:openapi-request-validator-mockmvc:${openapiValidatorVersion}"
+}
+
+// Solo el jar ejecutable (evita el -plain.jar en build/libs)
+tasks.named('jar') {
+    enabled = false
+}

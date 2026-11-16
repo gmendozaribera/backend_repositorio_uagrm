@@ -34,6 +34,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/auth/login",
+                                "/api/v1/auth/register",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/2fa/verify").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/error").permitAll()

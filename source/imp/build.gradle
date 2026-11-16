@@ -7,6 +7,9 @@ dependencies {
     api 'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server'
     api 'org.springframework.boot:spring-boot-starter-data-redis'
     api "dev.samstevens.totp:totp:${totpVersion}"
+    // Importacion del padron estudiantil: CSV y Excel (.xlsx con poi-ooxml, .xls con poi)
+    implementation "org.apache.commons:commons-csv:${commonsCsvVersion}"
+    implementation "org.apache.poi:poi-ooxml:${poiVersion}"
 
     testImplementation project(':mockup')
 }

@@ -21,6 +21,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
@@ -73,6 +75,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return conTimestamp(problem);
     }
 
+    /** Request multipart mal formado (cuerpo cortado, boundary invalido). */
+    @ExceptionHandler(MultipartException.class)
+    public ProblemDetail handleMultipart(MultipartException ex) {
+        log.warn("Multipart invalido: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "No se pudo leer el archivo enviado.");
+        problem.setTitle("Archivo invalido");
+        return conTimestamp(problem);
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleInesperado(Exception ex) {
         log.error("Error no controlado", ex);
@@ -93,6 +105,16 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         problem.setTitle("Datos invalidos");
         problem.setProperty("errores", errores);
         return handleExceptionInternal(ex, problem, headers, status, request);
+    }
+
+    /** Archivo mas grande que spring.servlet.multipart.max-file-size: 400 (el contrato no usa 413). */
+    @Override
+    protected ResponseEntity<Object> handleMaxUploadSizeExceededException(
+            MaxUploadSizeExceededException ex, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "El archivo supera el tamano maximo permitido.");
+        problem.setTitle("Archivo invalido");
+        return handleExceptionInternal(ex, problem, headers, HttpStatus.BAD_REQUEST, request);
     }
 
     /** Agrega timestamp tambien a los ProblemDetail que genera Spring MVC (404, 405, 415, etc.). */

@@ -16,6 +16,7 @@ import com.uagrm.repositorio.auth.controller.DosFactoresController;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dto.auth.ActivarDosFactoresResponse;
 import com.uagrm.repositorio.dto.auth.LoginResponse;
+import com.uagrm.repositorio.dto.auth.RegistroResponse;
 import com.uagrm.repositorio.dto.auth.TokenResponse;
 import com.uagrm.repositorio.dto.auth.UsuarioSesionDto;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
@@ -25,6 +26,7 @@ import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import com.uagrm.repositorio.imp.service.AuthService;
 import com.uagrm.repositorio.imp.service.DosFactoresService;
+import com.uagrm.repositorio.imp.service.RegistroService;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
@@ -89,6 +91,9 @@ class AuthContratoTest {
     private DosFactoresService dosFactoresService;
 
     @MockitoBean
+    private RegistroService registroService;
+
+    @MockitoBean
     private RevocacionTokenService revocacionTokenService;
 
     private Usuario usuario;
@@ -128,6 +133,39 @@ class AuthContratoTest {
     @Test
     void loginConCamposVaciosDevuelveErroresPorCampo() throws Exception {
         llamar(post("/api/v1/auth/login"), "{\"usuario\":\"\"}")
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    // ---------- register (publico) ----------
+
+    private static final String REGISTRO = "{\"ci\":7654321,\"registro\":219012345}";
+
+    @Test
+    void registrarEstudianteSinToken() throws Exception {
+        when(registroService.registrar(any())).thenReturn(new RegistroResponse("219012345"));
+        llamar(post("/api/v1/auth/register"), REGISTRO)
+                .andExpect(status().isCreated()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void registrarNoEncontradoEnElPadronDevuelve404() throws Exception {
+        when(registroService.registrar(any())).thenThrow(new NegocioException(HttpStatus.NOT_FOUND,
+                "No encontrado en el padron", "No encontrado en el padron institucional. Contacte a su facultad."));
+        llamar(post("/api/v1/auth/register"), REGISTRO)
+                .andExpect(status().isNotFound()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void registrarConCuentaExistenteDevuelve409() throws Exception {
+        when(registroService.registrar(any())).thenThrow(new NegocioException(HttpStatus.CONFLICT, "Cuenta existente",
+                "Ya tiene una cuenta registrada. Si olvido su contrasena, contacte a su facultad."));
+        llamar(post("/api/v1/auth/register"), REGISTRO)
+                .andExpect(status().isConflict()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void registrarConDatosInvalidosDevuelve400() throws Exception {
+        llamar(post("/api/v1/auth/register"), "{\"ci\":-1}")
                 .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
     }
 
