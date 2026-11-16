@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - catalog-service
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Catalogos academicos por facultad: facultades, carreras, materias, semestres, grupos (con sus docentes),
     fases y tipos de trabajo.
@@ -38,6 +38,8 @@ servers:
 tags:
   - name: Facultades
     description: Facultades de la universidad (raiz de todos los catalogos)
+  - name: ConfigFacultad
+    description: Parametros propios de cada facultad (archivos, plagio, calificacion, acceso externo, sesion)
   - name: Carreras
     description: Carreras de cada facultad
   - name: Materias
@@ -147,6 +149,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RespuestaFacultad'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/facultades/{id}/config:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [ConfigFacultad]
+      operationId: obtenerConfigFacultad
+      summary: Obtener la configuracion de la facultad
+      description: |
+        Cualquier usuario autenticado (el frontend la usa, p. ej., para validar el tamano de archivo).
+        Si la facultad aun no tiene configuracion propia devuelve los valores por defecto del sistema
+        (parametros del grupo `FACULTAD_DEFAULT_GROUP` de la tabla de dominio) con `personalizada = false`.
+        Se sirve desde cache (hasta 10 minutos); el `PUT` la invalida al instante.
+      responses:
+        '200':
+          description: Configuracion vigente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaConfigFacultad'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    put:
+      tags: [ConfigFacultad]
+      operationId: actualizarConfigFacultad
+      summary: Guardar la configuracion de la facultad (ADMIN)
+      description: |
+        Crea o reemplaza la configuracion propia de la facultad (`personalizada` pasa a true).
+        Los cambios se aplican al instante en todos los modulos de esa facultad; `jwtExpiracionHoras`
+        afecta a las sesiones que se inicien desde ese momento. `umbralPlagioMedio` debe ser menor que
+        `umbralPlagioAlto` (400).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigFacultadRequest'
+      responses:
+        '200':
+          description: Configuracion guardada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaConfigFacultad'
         '400':
           $ref: '#/components/responses/DatosInvalidos'
         '401':
@@ -1180,6 +1244,53 @@ components:
           $ref: '#/components/schemas/Id'
         estado:
           $ref: '#/components/schemas/EstadoOpcional'
+    ConfigFacultadRequest:
+      type: object
+      required: [tamanoMaxArchivoMB, umbralPlagioMedio, umbralPlagioAlto, comparacionInternet, accesoExterno, escalaCalifMax, jwtExpiracionHoras]
+      properties:
+        tamanoMaxArchivoMB:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 100
+          description: Tamano maximo por archivo en MB (los videos subidos directamente tienen un limite fijo de 100 MB).
+          example: 10
+        umbralPlagioMedio:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 100
+          description: Porcentaje de similitud desde el que el riesgo es medio (amarillo).
+          example: 30
+        umbralPlagioAlto:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 100
+          description: Porcentaje de similitud desde el que el riesgo es alto (rojo). Debe ser mayor que umbralPlagioMedio.
+          example: 50
+        comparacionInternet:
+          type: boolean
+          description: Si el analisis de plagio compara tambien con fuentes de internet.
+          example: false
+        accesoExterno:
+          type: boolean
+          description: Si usuarios anonimos pueden ver los metadatos de los trabajos evaluados.
+          example: false
+        escalaCalifMax:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 1000
+          description: Calificacion maxima (la escala va de 0 a este valor).
+          example: 100
+        jwtExpiracionHoras:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 24
+          description: Horas de vida del access token de los usuarios de esta facultad.
+          example: 1
     AsignarDocenteRequest:
       type: object
       required: [idUsuario, esAdminCurso]
@@ -1245,6 +1356,42 @@ components:
           example: FICCT
         estado:
           $ref: '#/components/schemas/Estado'
+    ConfigFacultad:
+      type: object
+      required: [idFacultad, personalizada, tamanoMaxArchivoMB, umbralPlagioMedio, umbralPlagioAlto, comparacionInternet, accesoExterno, escalaCalifMax, jwtExpiracionHoras]
+      properties:
+        idFacultad:
+          $ref: '#/components/schemas/Id'
+        personalizada:
+          type: boolean
+          description: false si la facultad usa los valores por defecto del sistema (aun no se guardo su configuracion).
+          example: true
+        tamanoMaxArchivoMB:
+          type: integer
+          format: int32
+          example: 10
+        umbralPlagioMedio:
+          type: integer
+          format: int32
+          example: 30
+        umbralPlagioAlto:
+          type: integer
+          format: int32
+          example: 50
+        comparacionInternet:
+          type: boolean
+          example: false
+        accesoExterno:
+          type: boolean
+          example: false
+        escalaCalifMax:
+          type: integer
+          format: int32
+          example: 100
+        jwtExpiracionHoras:
+          type: integer
+          format: int32
+          example: 1
     Carrera:
       type: object
       required: [idCarrera, nombre, sigla, idFacultad, estado]
@@ -1385,6 +1532,20 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Facultad'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaConfigFacultad:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/ConfigFacultad'
         message:
           type: string
         status:

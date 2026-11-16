@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - user-service
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Gestion de usuarios (personas + cuentas), roles, padron estudiantil (EstudianteHabilitado) y
     parametros configurables del sistema (tabla de dominio).
@@ -23,6 +23,10 @@ info:
     - **Dominio:** todo parametro configurable del sistema vive en la tabla de dominio, agrupado por
       `domainGroup` + `domainName`. Los servicios lo leen con cache (hasta 10 minutos); toda escritura invalida
       la cache del grupo al instante.
+    - **Parametros secretos** (`secreto = true`, p. ej. `SMTP_GROUP.PASSWORD`): se guardan cifrados y la API
+      **nunca** devuelve su valor (`domainValue` llega vacio); para cambiarlos se envia el valor nuevo en el `PUT`.
+    - **Correo (SMTP):** se configura con los parametros del grupo `SMTP_GROUP` (HOST, PUERTO, CORREO, PASSWORD,
+      SEGURIDAD, ACTIVO) y se prueba con `POST /api/v1/config/smtp/prueba`.
 
     Formato de respuestas:
     - Exito: `{ data, message, status, timestamp }`
@@ -44,6 +48,8 @@ tags:
     description: Padron estudiantil importado (habilita el auto-registro)
   - name: Dominios
     description: Parametros configurables del sistema (tabla de dominio)
+  - name: ConfigSmtp
+    description: Prueba de la configuracion de correo saliente
 
 paths:
   # ---------------------------------------------------------------- Usuarios
@@ -483,6 +489,8 @@ paths:
       summary: Cambiar el valor o la descripcion de un parametro (ADMIN)
       description: |
         `domainGroup` y `domainName` no se modifican (el codigo los referencia por nombre).
+        En un parametro secreto, `domainValue` es el valor nuevo en texto plano (se cifra al guardar); la
+        respuesta no lo incluye.
         Si el parametro lo usa el sistema, su valor se valida segun su tipo (p. ej. `LOGIN_INTENTOS` debe ser
         un entero entre 1 y 1000) -> 400. El cambio se aplica en todos los servicios al instante.
       requestBody:
@@ -526,6 +534,47 @@ paths:
           $ref: '#/components/responses/NoEncontrado'
         '409':
           $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- SMTP
+  /api/v1/config/smtp/prueba:
+    post:
+      tags: [ConfigSmtp]
+      operationId: probarSmtp
+      summary: Enviar un correo de prueba (ADMIN)
+      description: |
+        Envia un correo al destinatario indicado usando la configuracion actual del grupo `SMTP_GROUP`
+        (aunque `ACTIVO` sea false, para poder probar antes de activarlo). Espera como maximo 15 segundos.
+        Si el servidor de correo rechaza la conexion o las credenciales responde 502 con el motivo en `detail`
+        (sin exponer la contrasena). 400 si falta configurar HOST, PUERTO o CORREO.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PruebaSmtpRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '502':
+          description: El servidor de correo rechazo la conexion, la autenticacion o el envio
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                status: 502
+                title: Error del servidor de correo
+                detail: 'No se pudo autenticar en smtp.gmail.com:587: credenciales rechazadas.'
+                instance: /api/v1/config/smtp/prueba
+                timestamp: '2026-11-16T14:00:00Z'
         '503':
           $ref: '#/components/responses/ServicioNoDisponible'
 
@@ -828,22 +877,33 @@ components:
           $ref: '#/components/schemas/CodigoDominio'
         domainValue:
           type: string
-          minLength: 1
+          minLength: 0
           maxLength: 500
+          description: Puede ser vacio solo si el parametro lo admite (p. ej. un secreto aun sin configurar).
           example: '10'
         description:
           type: string
           minLength: 1
           maxLength: 255
           example: Intentos fallidos permitidos por IP antes de bloquear el login y el auto-registro.
+    PruebaSmtpRequest:
+      type: object
+      required: [destinatario]
+      properties:
+        destinatario:
+          type: string
+          format: email
+          maxLength: 150
+          example: admin@uagrm.edu.bo
     ActualizarDominioRequest:
       type: object
       required: [domainValue, description]
       properties:
         domainValue:
           type: string
-          minLength: 1
+          minLength: 0
           maxLength: 500
+          description: Puede ser vacio solo si el parametro lo admite (p. ej. un secreto aun sin configurar).
           example: '10'
         description:
           type: string
@@ -854,7 +914,7 @@ components:
     # ---------- Datos ----------
     Dominio:
       type: object
-      required: [domainId, domainGroup, domainName, domainValue, description, lastUser, lastTime, sistema]
+      required: [domainId, domainGroup, domainName, domainValue, description, lastUser, lastTime, sistema, secreto, configurado]
       properties:
         domainId:
           $ref: '#/components/schemas/Id'
@@ -866,6 +926,7 @@ components:
           example: LOGIN_INTENTOS
         domainValue:
           type: string
+          description: Vacio en los parametros secretos (nunca se devuelve su valor).
           example: '10'
         description:
           type: string
@@ -881,6 +942,14 @@ components:
         sistema:
           type: boolean
           description: true si el sistema usa este parametro (no se puede eliminar y su valor se valida).
+          example: true
+        secreto:
+          type: boolean
+          description: true si el valor se guarda cifrado y nunca se devuelve (p. ej. contrasenas).
+          example: false
+        configurado:
+          type: boolean
+          description: Solo relevante en secretos; true si ya tiene un valor guardado.
           example: true
     Usuario:
       type: object
