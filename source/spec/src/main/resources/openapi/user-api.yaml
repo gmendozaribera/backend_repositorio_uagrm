@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - user-service
-  version: 1.2.0
+  version: 1.3.0
   description: |
     Gestion de usuarios (personas + cuentas), roles, padron estudiantil (EstudianteHabilitado) y
     parametros configurables del sistema (tabla de dominio).
@@ -11,7 +11,9 @@ info:
     Todo cambio pasa por aqui primero; los cambios incompatibles requieren subir la version mayor.
 
     Reglas generales:
-    - **Todos los endpoints son solo ADMIN** (403 para DOCENTE/ESTUDIANTE).
+    - **Todos los endpoints son solo ADMIN** (403 para DOCENTE/ESTUDIANTE), **excepto** `/api/v1/notificaciones/**`
+      y `/api/v1/perfil/**`, que puede usar cualquier usuario autenticado y siempre operan sobre SUS propios datos
+      (el usuario sale del token, nunca de un parametro).
     - **Sin borrado fisico de usuarios:** `DELETE` desactiva (`estado = 0`), cierra todas sus sesiones y
       devuelve el usuario. Para reactivar se envia `estado: 1` en el `PUT`.
     - **Contrasenas:** nunca se devuelven. Toda contrasena asignada por el administrador (alta o reset)
@@ -50,6 +52,10 @@ tags:
     description: Parametros configurables del sistema (tabla de dominio)
   - name: ConfigSmtp
     description: Prueba de la configuracion de correo saliente
+  - name: Notificaciones
+    description: Notificaciones in-app del usuario autenticado (campana)
+  - name: Perfil
+    description: Preferencias del usuario autenticado
 
 paths:
   # ---------------------------------------------------------------- Usuarios
@@ -578,6 +584,149 @@ paths:
         '503':
           $ref: '#/components/responses/ServicioNoDisponible'
 
+  # ---------------------------------------------------------------- Notificaciones (cualquier rol)
+  /api/v1/notificaciones:
+    get:
+      tags: [Notificaciones]
+      operationId: listarNotificaciones
+      summary: Mis notificaciones (paginado, mas recientes primero)
+      parameters:
+        - name: soloNoLeidas
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina de notificaciones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaNotificaciones'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/notificaciones/pendientes:
+    get:
+      tags: [Notificaciones]
+      operationId: contarNotificacionesPendientes
+      summary: Cantidad de notificaciones sin leer (para la campana)
+      description: |
+        Pensado para consultarse periodicamente: no toca la base de datos mientras el contador este en cache.
+        Devuelve tambien cada cuantos segundos conviene volver a consultar (parametro
+        `NOTIF_GROUP.POLLING_SEGUNDOS` de la tabla de dominio).
+      responses:
+        '200':
+          description: Contador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaNotificacionesPendientes'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/notificaciones/{id}/leida:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Notificaciones]
+      operationId: marcarNotificacionLeida
+      summary: Marcar una notificacion como leida
+      description: Idempotente. 404 si no existe o no pertenece al usuario autenticado.
+      responses:
+        '200':
+          description: Notificacion marcada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaNotificacion'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/notificaciones/leidas:
+    post:
+      tags: [Notificaciones]
+      operationId: marcarTodasNotificacionesLeidas
+      summary: Marcar todas mis notificaciones como leidas
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Perfil (cualquier rol)
+  /api/v1/perfil/preferencias:
+    get:
+      tags: [Perfil]
+      operationId: obtenerPreferencias
+      summary: Mis preferencias
+      responses:
+        '200':
+          description: Preferencias
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPreferencias'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    put:
+      tags: [Perfil]
+      operationId: actualizarPreferencias
+      summary: Cambiar mis preferencias
+      description: |
+        `notificarCorreo = true` envia, ademas de la notificacion in-app, un correo a la direccion del usuario
+        (solo si el administrador activo el correo saliente en `SMTP_GROUP.ACTIVO`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Preferencias'
+      responses:
+        '200':
+          description: Preferencias guardadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPreferencias'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
 security:
   - bearerAuth: []
 
@@ -655,7 +804,7 @@ components:
             instance: /api/v1/usuarios
             timestamp: '2026-11-16T14:00:00Z'
     AccesoDenegado:
-      description: El usuario no es ADMIN o tiene la contrasena pendiente de cambio
+      description: El usuario no es ADMIN (salvo notificaciones y perfil) o tiene la contrasena pendiente de cambio
       content:
         application/problem+json:
           schema:
@@ -886,6 +1035,14 @@ components:
           minLength: 1
           maxLength: 255
           example: Intentos fallidos permitidos por IP antes de bloquear el login y el auto-registro.
+    Preferencias:
+      type: object
+      required: [notificarCorreo]
+      properties:
+        notificarCorreo:
+          type: boolean
+          description: Recibir tambien por correo las notificaciones.
+          example: false
     PruebaSmtpRequest:
       type: object
       required: [destinatario]
@@ -1127,6 +1284,76 @@ components:
           type: integer
           format: int32
           example: 1
+    Notificacion:
+      type: object
+      required: [idNotificacion, tipo, titulo, mensaje, enlace, leida, fechaCreacion, fechaLectura]
+      properties:
+        idNotificacion:
+          $ref: '#/components/schemas/Id'
+        tipo:
+          type: string
+          description: Codigo del evento (p. ej. BIENVENIDA, PASSWORD_RESTABLECIDA; en el Sprint 3 TRABAJO_APROBADO...).
+          example: BIENVENIDA
+        titulo:
+          type: string
+          example: Bienvenido al Repositorio Digital
+        mensaje:
+          type: string
+          example: Tu cuenta fue creada. Recuerda cambiar tu contrasena.
+        enlace:
+          type: string
+          nullable: true
+          description: Ruta interna del frontend a la que lleva la notificacion (p. ej. /perfil/seguridad).
+          example: /perfil/seguridad
+        leida:
+          type: boolean
+          example: false
+        fechaCreacion:
+          type: string
+          format: date-time
+          example: '2026-11-16T14:00:00Z'
+        fechaLectura:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+    NotificacionesPendientes:
+      type: object
+      required: [cantidad, pollingSegundos]
+      properties:
+        cantidad:
+          type: integer
+          format: int64
+          example: 3
+        pollingSegundos:
+          type: integer
+          format: int32
+          description: Segundos recomendados hasta la siguiente consulta.
+          example: 30
+    PaginaNotificaciones:
+      type: object
+      required: [contenido, pagina, tamano, totalElementos, totalPaginas]
+      properties:
+        contenido:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notificacion'
+        pagina:
+          type: integer
+          format: int32
+          example: 0
+        tamano:
+          type: integer
+          format: int32
+          example: 20
+        totalElementos:
+          type: integer
+          format: int64
+          example: 1
+        totalPaginas:
+          type: integer
+          format: int32
+          example: 1
     PaginaPadron:
       type: object
       required: [contenido, pagina, tamano, totalElementos, totalPaginas]
@@ -1262,6 +1489,62 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Dominio'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaNotificacion:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Notificacion'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaPaginaNotificaciones:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/PaginaNotificaciones'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaNotificacionesPendientes:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/NotificacionesPendientes'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaPreferencias:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Preferencias'
         message:
           type: string
         status:
