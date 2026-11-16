@@ -1,0 +1,991 @@
+openapi: 3.0.3
+info:
+  title: Repositorio Digital UAGRM - user-service
+  version: 1.0.0
+  description: |
+    Gestion de usuarios (personas + cuentas), roles y padron estudiantil (EstudianteHabilitado).
+
+    **Contrato fuente de verdad.** El backend lo verifica con tests de contrato
+    (`UserContratoTest`) y el frontend genera su cliente TypeScript desde este archivo.
+    Todo cambio pasa por aqui primero; los cambios incompatibles requieren subir la version mayor.
+
+    Reglas generales:
+    - **Todos los endpoints son solo ADMIN** (403 para DOCENTE/ESTUDIANTE).
+    - **Sin borrado fisico de usuarios:** `DELETE` desactiva (`estado = 0`), cierra todas sus sesiones y
+      devuelve el usuario. Para reactivar se envia `estado: 1` en el `PUT`.
+    - **Contrasenas:** nunca se devuelven. Toda contrasena asignada por el administrador (alta o reset)
+      obliga al usuario a cambiarla en su proximo inicio de sesion.
+    - **Listados paginados:** `pagina` empieza en 0; `tamano` entre 1 y 100 (por defecto 20).
+    - **Padron:** el auto-registro de estudiantes (`POST /api/v1/auth/register` en auth-service) solo
+      acepta CI + registro que existan aqui con `habilitado = true`.
+
+    Formato de respuestas:
+    - Exito: `{ data, message, status, timestamp }`
+    - Error: `ProblemDetail` (RFC 7807) con `timestamp`; en validaciones incluye `errores` (campo -> mensaje).
+  contact:
+    name: Equipo Repositorio Digital FICCT
+  license:
+    name: Uso academico UAGRM
+    url: https://www.uagrm.edu.bo
+servers:
+  - url: http://localhost:8083
+    description: Desarrollo local
+tags:
+  - name: Usuarios
+    description: Cuentas de usuario y sus datos personales
+  - name: TiposUsuario
+    description: Roles del sistema
+  - name: Padron
+    description: Padron estudiantil importado (habilita el auto-registro)
+
+paths:
+  # ---------------------------------------------------------------- Usuarios
+  /api/v1/usuarios:
+    get:
+      tags: [Usuarios]
+      operationId: listarUsuarios
+      summary: Listar usuarios (paginado)
+      description: Los filtros se combinan. Ordenado por apellidos y nombre.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Texto libre; busca (sin distinguir mayusculas) en usuario, nombre, apellidos y correo, y por igualdad en CI y registro si es numerico.
+          schema:
+            type: string
+            maxLength: 100
+        - name: rol
+          in: query
+          required: false
+          description: Solo usuarios de este rol (p. ej. DOCENTE para asignar docentes a un grupo).
+          schema:
+            $ref: '#/components/schemas/Rol'
+        - name: idCarrera
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: incluirInactivos
+          in: query
+          required: false
+          description: Si es true tambien devuelve los usuarios desactivados.
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina de usuarios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaUsuarios'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Usuarios]
+      operationId: crearUsuario
+      summary: Crear usuario (ADMIN)
+      description: |
+        Crea la persona y su cuenta. El usuario debera cambiar `passwordInicial` en su primer inicio de sesion.
+        Para el rol ESTUDIANTE son obligatorios `registro` e `idCarrera`.
+        `usuario`, `ci`, `correo` y `registro` son unicos (409 si ya existen).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearUsuarioRequest'
+      responses:
+        '201':
+          description: Usuario creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaUsuario'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/usuarios/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Usuarios]
+      operationId: obtenerUsuario
+      summary: Obtener usuario
+      responses:
+        '200':
+          description: Usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaUsuario'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    put:
+      tags: [Usuarios]
+      operationId: actualizarUsuario
+      summary: Actualizar usuario (ADMIN)
+      description: |
+        Actualiza datos personales, rol y estado. El nombre de usuario (login) no se modifica.
+        Cambiar el rol o desactivar (`estado: 0`) cierra todas las sesiones del usuario.
+        Un administrador no puede desactivarse ni quitarse el rol ADMIN a si mismo (400).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarUsuarioRequest'
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaUsuario'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Usuarios]
+      operationId: desactivarUsuario
+      summary: Desactivar usuario (ADMIN)
+      description: Borrado logico (`estado = 0`) y cierre de todas sus sesiones. No se puede desactivar a si mismo (400).
+      responses:
+        '200':
+          description: Usuario desactivado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaUsuario'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/usuarios/{id}/password/reset:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Usuarios]
+      operationId: restablecerPassword
+      summary: Restablecer la contrasena de un usuario (ADMIN)
+      description: |
+        Asigna una contrasena temporal, obliga a cambiarla en el proximo inicio de sesion y cierra
+        todas las sesiones abiertas del usuario. Es la via de "recuperar contrasena" mientras no exista
+        recuperacion por correo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestablecerPasswordRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Tipos de usuario
+  /api/v1/tipos-usuario:
+    get:
+      tags: [TiposUsuario]
+      operationId: listarTiposUsuario
+      summary: Listar roles del sistema
+      responses:
+        '200':
+          description: Roles ordenados por id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaTiposUsuario'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Padron
+  /api/v1/padron:
+    get:
+      tags: [Padron]
+      operationId: listarPadron
+      summary: Listar estudiantes del padron (paginado)
+      description: Ordenado por apellidos y nombres. Los filtros se combinan.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Texto libre; busca en nombres, apellidos y correo, y por igualdad en CI y registro si es numerico.
+          schema:
+            type: string
+            maxLength: 100
+        - name: idCarrera
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: registrado
+          in: query
+          required: false
+          description: true = solo los que ya crearon su cuenta; false = solo los que aun no.
+          schema:
+            type: boolean
+        - name: habilitado
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina del padron
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaPadron'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/padron/import:
+    post:
+      tags: [Padron]
+      operationId: importarPadron
+      summary: Importar padron desde CSV o Excel (ADMIN)
+      description: |
+        Formatos: `.csv` (UTF-8, separador coma o punto y coma), `.xlsx` y `.xls` (primera hoja).
+        Maximo 5 MB y 10000 filas. La primera fila es la cabecera, con estas columnas en cualquier orden
+        (sin distinguir mayusculas): `registro, ci, correo, password_default, nombres, apellidos, sigla_carrera`.
+
+        Cada fila se valida por separado: las filas con errores se informan en `errores` y **no**
+        interrumpen la importacion. Si el `registro` ya existe en el padron, la fila lo actualiza
+        (incluida la contrasena por defecto y `habilitado = true`); si no, lo inserta.
+        Las cuentas ya creadas no se modifican. La contrasena por defecto se guarda cifrada (BCrypt).
+
+        Un archivo con otra extension, sin cabecera valida, vacio o demasiado grande devuelve 400 sin importar nada.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                  description: Archivo .csv, .xlsx o .xls
+      responses:
+        '200':
+          description: Importacion procesada (puede incluir filas con error)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaResultadoImportacion'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/padron/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Padron]
+      operationId: actualizarHabilitadoPadron
+      summary: Habilitar o inhabilitar un estudiante del padron (ADMIN)
+      description: Un estudiante inhabilitado no puede auto-registrarse. No afecta a una cuenta ya creada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarHabilitadoRequest'
+      responses:
+        '200':
+          description: Registro del padron actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaEstudianteHabilitado'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token emitido por auth-service (login, 2fa/verify, refresh o password/change).
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Id del registro.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    Pagina:
+      name: pagina
+      in: query
+      required: false
+      description: Numero de pagina, empieza en 0.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    Tamano:
+      name: tamano
+      in: query
+      required: false
+      description: Elementos por pagina.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    SinDatos:
+      description: Operacion realizada (data es null)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RespuestaSinDatos'
+    DatosInvalidos:
+      description: Cuerpo, parametros o archivo invalidos, o regla de negocio incumplida
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 400
+            title: Datos invalidos
+            detail: Uno o mas campos no son validos.
+            instance: /api/v1/usuarios
+            timestamp: '2026-11-16T14:00:00Z'
+            errores:
+              correo: debe ser una direccion de correo valida
+    NoAutenticado:
+      description: Token ausente, invalido, expirado o sesion cerrada
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 401
+            title: No autenticado
+            detail: Token ausente, invalido o expirado.
+            instance: /api/v1/usuarios
+            timestamp: '2026-11-16T14:00:00Z'
+    AccesoDenegado:
+      description: El usuario no es ADMIN o tiene la contrasena pendiente de cambio
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 403
+            title: Acceso denegado
+            detail: No tiene permisos para realizar esta accion.
+            instance: /api/v1/usuarios
+            timestamp: '2026-11-16T14:00:00Z'
+    NoEncontrado:
+      description: El registro indicado (o uno referenciado en el cuerpo) no existe
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 404
+            title: Recurso no encontrado
+            detail: No existe el usuario 99.
+            instance: /api/v1/usuarios/99
+            timestamp: '2026-11-16T14:00:00Z'
+    Conflicto:
+      description: Duplicado (usuario, CI, correo, registro) o referencia a un registro inactivo
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 409
+            title: Conflicto
+            detail: Ya existe una persona con el CI 7654321.
+            instance: /api/v1/usuarios
+            timestamp: '2026-11-16T14:00:00Z'
+    ServicioNoDisponible:
+      description: No se pudo verificar la sesion (Redis no responde); por seguridad se rechaza la operacion.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+
+  schemas:
+    # ---------- Comunes ----------
+    Estado:
+      type: integer
+      format: int32
+      enum: [0, 1]
+      description: 1 = activo, 0 = inactivo (desactivado).
+      example: 1
+    EstadoOpcional:
+      type: integer
+      format: int32
+      enum: [0, 1]
+      description: Opcional (omitir el campo, no enviar null). Si no se envia, se conserva el valor actual.
+      example: 1
+    Id:
+      type: integer
+      format: int32
+      minimum: 1
+      example: 1
+    Rol:
+      type: string
+      enum: [ADMIN, DOCENTE, ESTUDIANTE]
+    PasswordTemporal:
+      type: string
+      format: password
+      minLength: 8
+      maxLength: 72
+      pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$'
+      description: 8 a 72 caracteres, con al menos una mayuscula, una minuscula y un numero.
+
+    # ---------- Requests ----------
+    CrearUsuarioRequest:
+      type: object
+      required: [usuario, passwordInicial, rol, nombre, apellidos, ci, correo]
+      properties:
+        usuario:
+          type: string
+          minLength: 3
+          maxLength: 50
+          pattern: '^[A-Za-z0-9._-]+$'
+          description: Nombre de inicio de sesion (letras, numeros, punto, guion y guion bajo). Se guarda en minusculas.
+          example: doc.maria
+        passwordInicial:
+          $ref: '#/components/schemas/PasswordTemporal'
+        rol:
+          $ref: '#/components/schemas/Rol'
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Maria
+        apellidos:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Lopez Suarez
+        ci:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 7654321
+        correo:
+          type: string
+          format: email
+          maxLength: 150
+          example: maria.lopez@uagrm.edu.bo
+        celular:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          example: 70012345
+        fechaNac:
+          type: string
+          format: date
+          nullable: true
+          example: '1990-05-14'
+        registro:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          description: Numero de registro universitario. Obligatorio para ESTUDIANTE.
+          example: 219012345
+        idCarrera:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          description: Carrera de la persona. Obligatoria para ESTUDIANTE.
+          example: 1
+    ActualizarUsuarioRequest:
+      type: object
+      required: [rol, nombre, apellidos, ci, correo]
+      properties:
+        rol:
+          $ref: '#/components/schemas/Rol'
+        nombre:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Maria
+        apellidos:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Lopez Suarez
+        ci:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 7654321
+        correo:
+          type: string
+          format: email
+          maxLength: 150
+          example: maria.lopez@uagrm.edu.bo
+        celular:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          example: 70012345
+        fechaNac:
+          type: string
+          format: date
+          nullable: true
+          example: '1990-05-14'
+        registro:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          example: 219012345
+        idCarrera:
+          type: integer
+          format: int32
+          minimum: 1
+          nullable: true
+          example: 1
+        estado:
+          $ref: '#/components/schemas/EstadoOpcional'
+    RestablecerPasswordRequest:
+      type: object
+      required: [passwordNueva]
+      properties:
+        passwordNueva:
+          $ref: '#/components/schemas/PasswordTemporal'
+    ActualizarHabilitadoRequest:
+      type: object
+      required: [habilitado]
+      properties:
+        habilitado:
+          type: boolean
+          example: false
+
+    # ---------- Datos ----------
+    Usuario:
+      type: object
+      required: [idUsuario, usuario, rol, estado, requiereCambioPassword, twoFactorEnabled, idPersona, nombre, apellidos, ci, correo, celular, fechaNac, registro, idCarrera, siglaCarrera]
+      properties:
+        idUsuario:
+          $ref: '#/components/schemas/Id'
+        usuario:
+          type: string
+          example: doc.maria
+        rol:
+          $ref: '#/components/schemas/Rol'
+        estado:
+          $ref: '#/components/schemas/Estado'
+        requiereCambioPassword:
+          type: boolean
+          example: true
+        twoFactorEnabled:
+          type: boolean
+          example: false
+        idPersona:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          type: string
+          example: Maria
+        apellidos:
+          type: string
+          example: Lopez Suarez
+        ci:
+          type: integer
+          format: int32
+          example: 7654321
+        correo:
+          type: string
+          format: email
+          example: maria.lopez@uagrm.edu.bo
+        celular:
+          type: integer
+          format: int32
+          nullable: true
+          example: 70012345
+        fechaNac:
+          type: string
+          format: date
+          nullable: true
+          example: '1990-05-14'
+        registro:
+          type: integer
+          format: int32
+          nullable: true
+          example: null
+        idCarrera:
+          type: integer
+          format: int32
+          nullable: true
+          example: null
+        siglaCarrera:
+          type: string
+          nullable: true
+          example: null
+    TipoUsuario:
+      type: object
+      required: [idTipoUsuario, nombre, descripcion, estado]
+      properties:
+        idTipoUsuario:
+          $ref: '#/components/schemas/Id'
+        nombre:
+          $ref: '#/components/schemas/Rol'
+        descripcion:
+          type: string
+          nullable: true
+          example: Revision y calificacion de trabajos de sus grupos
+        estado:
+          $ref: '#/components/schemas/Estado'
+    EstudianteHabilitado:
+      type: object
+      required: [id, registro, ci, correo, nombres, apellidos, idCarrera, siglaCarrera, habilitado, registrado]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        registro:
+          type: integer
+          format: int32
+          example: 219012345
+        ci:
+          type: integer
+          format: int32
+          example: 7654321
+        correo:
+          type: string
+          format: email
+          example: juan.perez@uagrm.edu.bo
+        nombres:
+          type: string
+          example: Juan Carlos
+        apellidos:
+          type: string
+          example: Perez Lopez
+        idCarrera:
+          $ref: '#/components/schemas/Id'
+        siglaCarrera:
+          type: string
+          example: INF
+        habilitado:
+          type: boolean
+          description: Si es false no puede auto-registrarse.
+          example: true
+        registrado:
+          type: boolean
+          description: true si el estudiante ya creo su cuenta.
+          example: false
+    ErrorImportacion:
+      type: object
+      required: [fila, columna, mensaje]
+      properties:
+        fila:
+          type: integer
+          format: int32
+          description: Numero de fila en el archivo (la cabecera es la fila 1).
+          example: 7
+        columna:
+          type: string
+          nullable: true
+          description: Columna con el error; null si el error es de toda la fila.
+          example: sigla_carrera
+        mensaje:
+          type: string
+          example: No existe una carrera activa con la sigla XYZ
+    ResultadoImportacion:
+      type: object
+      required: [totalFilas, insertados, actualizados, conErrores, errores]
+      properties:
+        totalFilas:
+          type: integer
+          format: int32
+          description: Filas de datos leidas (sin contar la cabecera ni las filas vacias).
+          example: 120
+        insertados:
+          type: integer
+          format: int32
+          example: 100
+        actualizados:
+          type: integer
+          format: int32
+          example: 15
+        conErrores:
+          type: integer
+          format: int32
+          example: 5
+        errores:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorImportacion'
+    PaginaUsuarios:
+      type: object
+      required: [contenido, pagina, tamano, totalElementos, totalPaginas]
+      properties:
+        contenido:
+          type: array
+          items:
+            $ref: '#/components/schemas/Usuario'
+        pagina:
+          type: integer
+          format: int32
+          example: 0
+        tamano:
+          type: integer
+          format: int32
+          example: 20
+        totalElementos:
+          type: integer
+          format: int64
+          example: 1
+        totalPaginas:
+          type: integer
+          format: int32
+          example: 1
+    PaginaPadron:
+      type: object
+      required: [contenido, pagina, tamano, totalElementos, totalPaginas]
+      properties:
+        contenido:
+          type: array
+          items:
+            $ref: '#/components/schemas/EstudianteHabilitado'
+        pagina:
+          type: integer
+          format: int32
+          example: 0
+        tamano:
+          type: integer
+          format: int32
+          example: 20
+        totalElementos:
+          type: integer
+          format: int64
+          example: 1
+        totalPaginas:
+          type: integer
+          format: int32
+          example: 1
+
+    # ---------- Envoltorios ApiResponse<T> ----------
+    # OpenAPI 3.0 no tiene genericos: un esquema plano por cada tipo de data.
+    RespuestaUsuario:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Usuario'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaPaginaUsuarios:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/PaginaUsuarios'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaTiposUsuario:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TipoUsuario'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaEstudianteHabilitado:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/EstudianteHabilitado'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaPaginaPadron:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/PaginaPadron'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaResultadoImportacion:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/ResultadoImportacion'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaSinDatos:
+      type: object
+      description: Operaciones sin resultado; data siempre es null.
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: object
+          nullable: true
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---------- Errores ----------
+    ProblemDetail:
+      type: object
+      required: [status, title, timestamp]
+      properties:
+        type:
+          type: string
+        status:
+          type: integer
+          format: int32
+        title:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        errores:
+          type: object
+          description: Solo en errores de validacion; campo -> mensaje.
+          additionalProperties:
+            type: string
