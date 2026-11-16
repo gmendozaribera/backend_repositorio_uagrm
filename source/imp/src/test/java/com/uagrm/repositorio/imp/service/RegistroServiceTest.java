@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,8 +26,10 @@ import com.uagrm.repositorio.dto.auth.RegistroRequest;
 import com.uagrm.repositorio.dto.auth.RegistroResponse;
 import com.uagrm.repositorio.dto.mapper.UsuarioMapperImpl;
 import com.uagrm.repositorio.imp.config.SeguridadProperties;
+import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.DosFactoresPendienteService;
+import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.TotpService;
@@ -44,6 +48,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 class RegistroServiceTest {
 
     private static final String PASSWORD_DEFAULT = "Uagrm2026";
+    private static final String IP = "203.0.113.7";
     /** BCrypt con costo bajo: el test verifica el flujo, no la fuerza del hash. */
     private static final PasswordEncoder BCRYPT = new BCryptPasswordEncoder(4);
     private static final String HASH = BCRYPT.encode(PASSWORD_DEFAULT);
@@ -52,6 +57,7 @@ class RegistroServiceTest {
     private final PersonaRepository personaRepository = mock(PersonaRepository.class);
     private final UsuarioRepository usuarioRepository = mock(UsuarioRepository.class);
     private final TipoUsuarioRepository tipoUsuarioRepository = mock(TipoUsuarioRepository.class);
+    private final LimiteIntentosService limiteIntentos = mock(LimiteIntentosService.class);
 
     private RegistroService registroService;
     private EstudianteHabilitado padron;
@@ -60,7 +66,7 @@ class RegistroServiceTest {
     @BeforeEach
     void setUp() {
         registroService = new RegistroService(padronRepository, personaRepository, usuarioRepository,
-                tipoUsuarioRepository);
+                tipoUsuarioRepository, limiteIntentos);
         padron = PadronMock.estudianteHabilitado(CatalogoMock.carrera(CatalogoMock.facultad()), HASH);
         when(padronRepository.findByCiAndRegistro(PadronMock.CI, PadronMock.REGISTRO)).thenReturn(Optional.of(padron));
         TipoUsuario estudiante = new TipoUsuario();
@@ -76,7 +82,7 @@ class RegistroServiceTest {
 
     @Test
     void creaPersonaYCuentaConLaPasswordDelPadronSinVolverACifrarla() {
-        RegistroResponse respuesta = registroService.registrar(request);
+        RegistroResponse respuesta = registroService.registrar(request, IP);
 
         assertThat(respuesta.usuario()).isEqualTo("219012345");
         Usuario usuario = usuarioGuardado();
@@ -94,7 +100,7 @@ class RegistroServiceTest {
 
     @Test
     void despuesDeRegistrarsePuedeIniciarSesionConLaPasswordDefaultYDebeCambiarla() {
-        registroService.registrar(request);
+        registroService.registrar(request, IP);
         Usuario usuario = usuarioGuardado();
 
         // AuthService real con BCrypt real: el login usa exactamente el hash copiado del padron
@@ -105,13 +111,14 @@ class RegistroServiceTest {
         ConfigFacultadRepository config = mock(ConfigFacultadRepository.class);
         when(config.findByFacultadIdFacultad(anyInt())).thenReturn(Optional.empty());
         AuthService authService = new AuthService(login, config, BCRYPT, jwtService, mock(TotpService.class),
-                mock(RevocacionTokenService.class), mock(DosFactoresPendienteService.class), new UsuarioMapperImpl(),
+                mock(RevocacionTokenService.class), mock(DosFactoresPendienteService.class),
+                mock(LimiteIntentosService.class), new UsuarioMapperImpl(),
                 new SeguridadProperties(
                         new SeguridadProperties.Jwt("c2VjcmV0bw==", "test", Duration.ofHours(1), Duration.ofDays(7)),
                         new SeguridadProperties.DosFactores("Test", Duration.ofMinutes(5), 5),
                         List.of("http://localhost:4200")));
 
-        LoginResponse respuesta = authService.login(new LoginRequest("219012345", PASSWORD_DEFAULT));
+        LoginResponse respuesta = authService.login(new LoginRequest("219012345", PASSWORD_DEFAULT), IP);
 
         assertThat(respuesta.tokens()).isNotNull();
         assertThat(respuesta.tokens().usuario().requiereCambioPassword()).isTrue();
@@ -122,7 +129,7 @@ class RegistroServiceTest {
     void ciYRegistroQueNoEstanEnElPadronDevuelve404() {
         when(padronRepository.findByCiAndRegistro(PadronMock.CI, PadronMock.REGISTRO)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> registroService.registrar(request))
+        assertThatThrownBy(() -> registroService.registrar(request, IP))
                 .isInstanceOfSatisfying(NegocioException.class, ex -> {
                     assertThat(ex.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
                     assertThat(ex.getMessage()).isEqualTo(
@@ -134,7 +141,7 @@ class RegistroServiceTest {
     void estudianteInhabilitadoDevuelveElMismo404() {
         padron.setHabilitado(false);
 
-        assertThatThrownBy(() -> registroService.registrar(request))
+        assertThatThrownBy(() -> registroService.registrar(request, IP))
                 .isInstanceOfSatisfying(NegocioException.class, ex -> {
                     assertThat(ex.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
                     assertThat(ex.getMessage()).isEqualTo(RegistroService.NO_EN_PADRON);
@@ -167,12 +174,55 @@ class RegistroServiceTest {
     }
 
     private void esperarConflicto(String detalle) {
-        assertThatThrownBy(() -> registroService.registrar(request))
+        assertThatThrownBy(() -> registroService.registrar(request, IP))
                 .isInstanceOfSatisfying(NegocioException.class, ex -> {
                     assertThat(ex.getStatus()).isEqualTo(HttpStatus.CONFLICT);
                     assertThat(ex.getMessage()).isEqualTo(detalle);
                 });
         verify(usuarioRepository, never()).save(any());
+    }
+
+    // ---------- CI como texto y limite de intentos ----------
+
+    @Test
+    void ciConComplementoSeBuscaSinEspaciosYEnMayusculas() {
+        padron.setCi("1234567-1A");
+        when(padronRepository.findByCiAndRegistro("1234567-1A", PadronMock.REGISTRO)).thenReturn(Optional.of(padron));
+
+        registroService.registrar(new RegistroRequest(" 1234567-1a ", PadronMock.REGISTRO), IP);
+
+        assertThat(usuarioGuardado().getPersona().getCi()).isEqualTo("1234567-1A");
+    }
+
+    @Test
+    void noEncontradoYCuentaExistenteSumanUnIntentoFallido() {
+        when(padronRepository.findByCiAndRegistro(PadronMock.CI, PadronMock.REGISTRO)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> registroService.registrar(request, IP)).isInstanceOf(NegocioException.class);
+
+        when(padronRepository.findByCiAndRegistro(PadronMock.CI, PadronMock.REGISTRO)).thenReturn(Optional.of(padron));
+        when(personaRepository.existsByCi(PadronMock.CI)).thenReturn(true);
+        assertThatThrownBy(() -> registroService.registrar(request, IP)).isInstanceOf(NegocioException.class);
+
+        verify(limiteIntentos, times(2)).registrarFallo(LimiteIntentosService.Operacion.REGISTRO, IP);
+    }
+
+    @Test
+    void registroExitosoNoCuentaComoFallo() {
+        registroService.registrar(request, IP);
+
+        verify(limiteIntentos).verificar(LimiteIntentosService.Operacion.REGISTRO, IP);
+        verify(limiteIntentos, never()).registrarFallo(any(), any());
+    }
+
+    @Test
+    void ipBloqueadaRecibe429SinConsultarElPadron() {
+        doThrow(new LimiteIntentosException(60)).when(limiteIntentos)
+                .verificar(LimiteIntentosService.Operacion.REGISTRO, IP);
+
+        assertThatThrownBy(() -> registroService.registrar(request, IP))
+                .isInstanceOfSatisfying(LimiteIntentosException.class,
+                        ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS));
+        verify(padronRepository, never()).findByCiAndRegistro(any(), any());
     }
 
     private Usuario usuarioGuardado() {

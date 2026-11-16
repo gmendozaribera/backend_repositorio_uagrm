@@ -4,7 +4,7 @@ package com.uagrm.repositorio.dto.padron;
 public record EstudianteHabilitadoResponse(
         Integer id,
         Integer registro,
-        Integer ci,
+        String ci,
         String correo,
         String nombres,
         String apellidos,

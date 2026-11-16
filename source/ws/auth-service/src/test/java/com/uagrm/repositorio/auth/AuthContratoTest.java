@@ -1,9 +1,13 @@
 package com.uagrm.repositorio.auth;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.atlassian.oai.validator.OpenApiInteractionValidator;
@@ -20,6 +24,7 @@ import com.uagrm.repositorio.dto.auth.RegistroResponse;
 import com.uagrm.repositorio.dto.auth.TokenResponse;
 import com.uagrm.repositorio.dto.auth.UsuarioSesionDto;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
+import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
@@ -34,6 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -111,23 +117,38 @@ class AuthContratoTest {
 
     @Test
     void loginSinDosFactores() throws Exception {
-        when(authService.login(any())).thenReturn(LoginResponse.completo(tokens));
+        when(authService.login(any(), any())).thenReturn(LoginResponse.completo(tokens));
         llamar(post("/api/v1/auth/login"), "{\"usuario\":\"est.juan\",\"password\":\"Secreta2026\"}")
                 .andExpect(status().isOk()).andExpect(cumpleContrato());
     }
 
     @Test
     void loginConDosFactores() throws Exception {
-        when(authService.login(any())).thenReturn(LoginResponse.pendienteDosFactores("token-temporal"));
+        when(authService.login(any(), any())).thenReturn(LoginResponse.pendienteDosFactores("token-temporal"));
         llamar(post("/api/v1/auth/login"), "{\"usuario\":\"est.juan\",\"password\":\"Secreta2026\"}")
                 .andExpect(status().isOk()).andExpect(cumpleContrato());
     }
 
     @Test
     void loginCredencialesIncorrectas() throws Exception {
-        when(authService.login(any())).thenThrow(NegocioException.noAutorizado("Usuario o contrasena incorrectos."));
+        when(authService.login(any(), any())).thenThrow(NegocioException.noAutorizado("Usuario o contrasena incorrectos."));
         llamar(post("/api/v1/auth/login"), "{\"usuario\":\"est.juan\",\"password\":\"mala\"}")
                 .andExpect(status().isUnauthorized()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void loginDesdeUnaIpBloqueadaDevuelve429ConRetryAfter() throws Exception {
+        when(authService.login(any(), any())).thenThrow(new LimiteIntentosException(900));
+        llamar(post("/api/v1/auth/login").with(request -> {
+                    request.setRemoteAddr("203.0.113.7");
+                    return request;
+                }), "{\"usuario\":\"est.juan\",\"password\":\"mala\"}")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "900"))
+                .andExpect(jsonPath("$.detail").value("Demasiados intentos fallidos. Intente de nuevo en 15 minutos."))
+                .andExpect(cumpleContrato());
+        // El service recibe la IP del cliente
+        verify(authService).login(any(), eq("203.0.113.7"));
     }
 
     @Test
@@ -138,18 +159,18 @@ class AuthContratoTest {
 
     // ---------- register (publico) ----------
 
-    private static final String REGISTRO = "{\"ci\":7654321,\"registro\":219012345}";
+    private static final String REGISTRO = "{\"ci\":\"7654321-1A\",\"registro\":219012345}";
 
     @Test
     void registrarEstudianteSinToken() throws Exception {
-        when(registroService.registrar(any())).thenReturn(new RegistroResponse("219012345"));
+        when(registroService.registrar(any(), any())).thenReturn(new RegistroResponse("219012345"));
         llamar(post("/api/v1/auth/register"), REGISTRO)
                 .andExpect(status().isCreated()).andExpect(cumpleContrato());
     }
 
     @Test
     void registrarNoEncontradoEnElPadronDevuelve404() throws Exception {
-        when(registroService.registrar(any())).thenThrow(new NegocioException(HttpStatus.NOT_FOUND,
+        when(registroService.registrar(any(), any())).thenThrow(new NegocioException(HttpStatus.NOT_FOUND,
                 "No encontrado en el padron", "No encontrado en el padron institucional. Contacte a su facultad."));
         llamar(post("/api/v1/auth/register"), REGISTRO)
                 .andExpect(status().isNotFound()).andExpect(cumpleContrato());
@@ -157,10 +178,26 @@ class AuthContratoTest {
 
     @Test
     void registrarConCuentaExistenteDevuelve409() throws Exception {
-        when(registroService.registrar(any())).thenThrow(new NegocioException(HttpStatus.CONFLICT, "Cuenta existente",
+        when(registroService.registrar(any(), any())).thenThrow(new NegocioException(HttpStatus.CONFLICT, "Cuenta existente",
                 "Ya tiene una cuenta registrada. Si olvido su contrasena, contacte a su facultad."));
         llamar(post("/api/v1/auth/register"), REGISTRO)
                 .andExpect(status().isConflict()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void registrarDesdeUnaIpBloqueadaDevuelve429ConRetryAfter() throws Exception {
+        when(registroService.registrar(any(), any())).thenThrow(new LimiteIntentosException(840));
+        llamar(post("/api/v1/auth/register"), REGISTRO)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "840"))
+                .andExpect(cumpleContrato());
+    }
+
+    @Test
+    void registrarConCiConComplementoEnMinusculasEsValido() throws Exception {
+        when(registroService.registrar(any(), any())).thenReturn(new RegistroResponse("219012345"));
+        llamar(post("/api/v1/auth/register"), "{\"ci\":\"1234567-1a\",\"registro\":219012345}")
+                .andExpect(status().isCreated()).andExpect(cumpleContrato());
     }
 
     @Test

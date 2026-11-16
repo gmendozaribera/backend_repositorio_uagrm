@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,8 +23,10 @@ import com.uagrm.repositorio.dto.auth.RefreshRequest;
 import com.uagrm.repositorio.dto.auth.TokenResponse;
 import com.uagrm.repositorio.dto.mapper.UsuarioMapperImpl;
 import com.uagrm.repositorio.imp.config.SeguridadProperties;
+import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.DosFactoresPendienteService;
+import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.TotpService;
@@ -39,6 +43,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 class AuthServiceTest {
 
     private static final String PASSWORD = "Secreta2026";
+    private static final String IP = "203.0.113.7";
 
     private final UsuarioRepository usuarioRepository = mock(UsuarioRepository.class);
     private final ConfigFacultadRepository configFacultadRepository = mock(ConfigFacultadRepository.class);
@@ -47,6 +52,7 @@ class AuthServiceTest {
     private final TotpService totpService = mock(TotpService.class);
     private final RevocacionTokenService revocacionTokenService = mock(RevocacionTokenService.class);
     private final DosFactoresPendienteService dosFactoresPendienteService = mock(DosFactoresPendienteService.class);
+    private final LimiteIntentosService limiteIntentos = mock(LimiteIntentosService.class);
 
     private AuthService authService;
     private Usuario usuario;
@@ -58,7 +64,7 @@ class AuthServiceTest {
                 new SeguridadProperties.DosFactores("Test", Duration.ofMinutes(5), 5),
                 List.of("http://localhost:4200"));
         authService = new AuthService(usuarioRepository, configFacultadRepository, passwordEncoder, jwtService,
-                totpService, revocacionTokenService, dosFactoresPendienteService, new UsuarioMapperImpl(), props);
+                totpService, revocacionTokenService, dosFactoresPendienteService, limiteIntentos, new UsuarioMapperImpl(), props);
 
         usuario = UsuarioMock.estudiante();
         when(usuarioRepository.findByUsuario(usuario.getUsuario())).thenReturn(Optional.of(usuario));
@@ -70,7 +76,7 @@ class AuthServiceTest {
 
     @Test
     void loginCorrectoSinDosFactoresDevuelveTokensYRol() {
-        LoginResponse respuesta = authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD));
+        LoginResponse respuesta = authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP);
 
         assertThat(respuesta.requiereDosFactores()).isFalse();
         assertThat(respuesta.tokens().accessToken()).isEqualTo("access");
@@ -82,10 +88,10 @@ class AuthServiceTest {
     void passwordIncorrectaYUsuarioInexistenteDanElMismoError() {
         when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$ficticio");
 
-        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), "otra")))
+        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), "otra"), IP))
                 .isInstanceOf(NegocioException.class)
                 .hasMessage("Usuario o contrasena incorrectos.");
-        assertThatThrownBy(() -> authService.login(new LoginRequest("no.existe", PASSWORD)))
+        assertThatThrownBy(() -> authService.login(new LoginRequest("no.existe", PASSWORD), IP))
                 .isInstanceOf(NegocioException.class)
                 .hasMessage("Usuario o contrasena incorrectos.");
 
@@ -98,7 +104,7 @@ class AuthServiceTest {
         usuario.setTwoFactorEnabled(true);
         when(dosFactoresPendienteService.crear(usuario.getIdUsuario())).thenReturn("token-temporal");
 
-        LoginResponse respuesta = authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD));
+        LoginResponse respuesta = authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP);
 
         assertThat(respuesta.requiereDosFactores()).isTrue();
         assertThat(respuesta.tokenTemporal()).isEqualTo("token-temporal");
@@ -110,7 +116,7 @@ class AuthServiceTest {
     void cuentaDesactivadaEsRechazadaConForbidden() {
         usuario.setEstado(Estado.INACTIVO);
 
-        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD)))
+        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP))
                 .isInstanceOfSatisfying(NegocioException.class,
                         ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
     }
@@ -139,6 +145,46 @@ class AuthServiceTest {
                 .isInstanceOfSatisfying(NegocioException.class,
                         ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED));
         verify(jwtService, never()).generar(any(), any());
+    }
+
+    // ---------- limite de intentos por IP ----------
+
+    @Test
+    void credencialesIncorrectasSumanUnIntentoFallidoDeLaIp() {
+        when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$ficticio");
+
+        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), "otra"), IP))
+                .isInstanceOf(NegocioException.class);
+        assertThatThrownBy(() -> authService.login(new LoginRequest("no.existe", PASSWORD), IP))
+                .isInstanceOf(NegocioException.class);
+
+        verify(limiteIntentos, times(2)).verificar(LimiteIntentosService.Operacion.LOGIN, IP);
+        verify(limiteIntentos, times(2)).registrarFallo(LimiteIntentosService.Operacion.LOGIN, IP);
+    }
+
+    @Test
+    void loginExitosoYCuentaDesactivadaNoCuentanComoFallo() {
+        authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP);
+        usuario.setEstado(Estado.INACTIVO);
+        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP))
+                .isInstanceOf(NegocioException.class);
+
+        verify(limiteIntentos, never()).registrarFallo(any(), any());
+    }
+
+    @Test
+    void ipBloqueadaRecibe429SinVerificarLaContrasena() {
+        doThrow(new LimiteIntentosException(900)).when(limiteIntentos)
+                .verificar(LimiteIntentosService.Operacion.LOGIN, IP);
+
+        assertThatThrownBy(() -> authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP))
+                .isInstanceOfSatisfying(LimiteIntentosException.class, ex -> {
+                    assertThat(ex.getStatus()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+                    assertThat(ex.getRetryAfterSegundos()).isEqualTo(900);
+                    assertThat(ex.getMessage()).isEqualTo("Demasiados intentos fallidos. Intente de nuevo en 15 minutos.");
+                });
+        verify(passwordEncoder, never()).matches(any(), any());
+        verify(limiteIntentos, never()).registrarFallo(any(), any());
     }
 
     private static Jwt jwtDe(Usuario usuario) {

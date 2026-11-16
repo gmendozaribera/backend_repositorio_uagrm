@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.atlassian.oai.validator.OpenApiInteractionValidator;
@@ -25,19 +26,24 @@ import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dto.common.PaginaResponse;
+import com.uagrm.repositorio.dto.dominio.DominioResponse;
 import com.uagrm.repositorio.dto.padron.EstudianteHabilitadoResponse;
 import com.uagrm.repositorio.dto.usuario.UsuarioResponse;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
+import com.uagrm.repositorio.imp.dominio.ConstantesDominio;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
+import com.uagrm.repositorio.imp.service.dominio.DominioService;
 import com.uagrm.repositorio.imp.service.padron.PadronService;
 import com.uagrm.repositorio.imp.service.usuario.UsuarioService;
 import com.uagrm.repositorio.mockup.CatalogoMock;
+import com.uagrm.repositorio.mockup.DominioMock;
 import com.uagrm.repositorio.mockup.PadronMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import com.uagrm.repositorio.user.config.SecurityConfig;
+import com.uagrm.repositorio.user.controller.DominioController;
 import com.uagrm.repositorio.user.controller.PadronController;
 import com.uagrm.repositorio.user.controller.TipoUsuarioController;
 import com.uagrm.repositorio.user.controller.UsuarioController;
@@ -63,7 +69,8 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  * seguridad solo ADMIN, ProblemDetail) cumplen spec/openapi/user-api.yaml. Cubre todas las operaciones.
  * Los servicios estan mockeados: aqui se prueba la forma de la API, no la logica de negocio.
  */
-@WebMvcTest(controllers = {UsuarioController.class, TipoUsuarioController.class, PadronController.class})
+@WebMvcTest(controllers = {UsuarioController.class, TipoUsuarioController.class, PadronController.class,
+        DominioController.class})
 @Import({SecurityConfig.class, SeguridadConfig.class, SeguridadErrorHandler.class, JwtService.class})
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
@@ -104,14 +111,14 @@ class UserContratoTest {
 
     private static final String CREAR_DOCENTE = """
             {"usuario":"doc.maria","passwordInicial":"Inicial2026","rol":"DOCENTE","nombre":"Maria",
-             "apellidos":"Lopez Suarez","ci":5554443,"correo":"maria.lopez@uagrm.edu.bo","celular":70012345,
+             "apellidos":"Lopez Suarez","ci":"5554443","correo":"maria.lopez@uagrm.edu.bo","celular":"+59170012345",
              "fechaNac":"1990-05-14"}""";
     private static final String CREAR_ESTUDIANTE = """
             {"usuario":"219012345","passwordInicial":"Inicial2026","rol":"ESTUDIANTE","nombre":"Juan Carlos",
-             "apellidos":"Perez Lopez","ci":7654321,"correo":"juan.perez@uagrm.edu.bo","celular":null,
+             "apellidos":"Perez Lopez","ci":"7654321-1A","correo":"juan.perez@uagrm.edu.bo","celular":null,
              "fechaNac":null,"registro":219012345,"idCarrera":10}""";
     private static final String ACTUALIZAR = """
-            {"rol":"DOCENTE","nombre":"Maria","apellidos":"Lopez Suarez","ci":5554443,
+            {"rol":"DOCENTE","nombre":"Maria","apellidos":"Lopez Suarez","ci":"5554443",
              "correo":"maria.lopez@uagrm.edu.bo","celular":null,"fechaNac":null,"registro":null,"idCarrera":null,
              "estado":1}""";
 
@@ -125,6 +132,8 @@ class UserContratoTest {
     private UsuarioService usuarioService;
     @MockitoBean
     private PadronService padronService;
+    @MockitoBean
+    private DominioService dominioService;
     @MockitoBean
     private RevocacionTokenService revocacionTokenService;
 
@@ -192,7 +201,7 @@ class UserContratoTest {
         when(usuarioService.obtener(5)).thenReturn(docente);
         when(usuarioService.actualizar(any(), eq(5), any())).thenReturn(docente);
         when(usuarioService.desactivar(any(), eq(5))).thenReturn(new UsuarioResponse(5, "doc.maria", "DOCENTE",
-                Estado.INACTIVO, true, false, 5, "Maria", "Lopez Suarez", 5554443, "maria.lopez@uagrm.edu.bo",
+                Estado.INACTIVO, true, false, 5, "Maria", "Lopez Suarez", "5554443", "maria.lopez@uagrm.edu.bo",
                 null, null, null, null, null));
 
         llamar(get("/api/v1/usuarios/5"), admin(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
@@ -222,6 +231,14 @@ class UserContratoTest {
                 NegocioException.conflicto("Ya existe una persona con el correo maria.lopez@uagrm.edu.bo."));
         llamar(put("/api/v1/usuarios/5"), admin(), ACTUALIZAR)
                 .andExpect(status().isConflict()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void ciOCelularConFormatoInvalidoDevuelven400() throws Exception {
+        llamar(post("/api/v1/usuarios"), admin(), CREAR_DOCENTE.replace("\"5554443\"", "\"12-ABCD\""))
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(post("/api/v1/usuarios"), admin(), CREAR_DOCENTE.replace("\"+59170012345\"", "\"70-012\""))
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
     }
 
     @Test
@@ -309,6 +326,70 @@ class UserContratoTest {
                 .andExpect(status().isForbidden()).andExpect(cumpleContratoMultipart());
     }
 
+    // ---------- Dominios ----------
+
+    @Test
+    void listarDominiosConYSinFiltro() throws Exception {
+        when(dominioService.listar(any())).thenReturn(List.of(loginIntentos(), DominioMock.response(3, "UI_GROUP",
+                "TEMA", "claro", false)));
+
+        llamar(get("/api/v1/dominios"), admin(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/dominios").param("domainGroup", ConstantesDominio.GRUPO_AUTH), admin(), null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        verify(dominioService).listar(ConstantesDominio.GRUPO_AUTH);
+        llamar(get("/api/v1/dominios").param("domainGroup", "1-malo"), admin(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void crearObtenerActualizarYEliminarDominio() throws Exception {
+        DominioResponse tema = DominioMock.response(3, "UI_GROUP", "TEMA", "claro", false);
+        when(dominioService.crear(any(), any())).thenReturn(tema);
+        when(dominioService.obtener(1)).thenReturn(loginIntentos());
+        when(dominioService.actualizar(any(), eq(1), any())).thenReturn(loginIntentos());
+
+        llamar(post("/api/v1/dominios"), admin(),
+                "{\"domainGroup\":\"ui_group\",\"domainName\":\"TEMA\",\"domainValue\":\"claro\",\"description\":\"Tema\"}")
+                .andExpect(status().isCreated()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/dominios/1"), admin(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(put("/api/v1/dominios/1"), admin(), "{\"domainValue\":\"5\",\"description\":\"Cinco intentos\"}")
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(delete("/api/v1/dominios/3"), admin(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        verify(dominioService).eliminar(3);
+    }
+
+    @Test
+    void dominioDuplicadoOInexistenteODelSistema() throws Exception {
+        when(dominioService.crear(any(), any())).thenThrow(NegocioException.conflicto("Ya existe el parametro."));
+        when(dominioService.obtener(99)).thenThrow(NegocioException.noEncontrado("No existe el parametro 99."));
+        doThrow(NegocioException.conflicto("El parametro lo usa el sistema y no se puede eliminar."))
+                .when(dominioService).eliminar(1);
+
+        llamar(post("/api/v1/dominios"), admin(),
+                "{\"domainGroup\":\"UI_GROUP\",\"domainName\":\"TEMA\",\"domainValue\":\"x\",\"description\":\"y\"}")
+                .andExpect(status().isConflict()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/dominios/99"), admin(), null).andExpect(status().isNotFound()).andExpect(cumpleContrato());
+        llamar(delete("/api/v1/dominios/1"), admin(), null).andExpect(status().isConflict()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void valorInvalidoDeUnParametroDelSistemaDevuelve400ConErrorEnDomainValue() throws Exception {
+        when(dominioService.actualizar(any(), eq(1), any())).thenThrow(
+                NegocioException.campoInvalido("domainValue", "debe ser un numero entero entre 1 y 1000"));
+
+        llamar(put("/api/v1/dominios/1"), admin(), "{\"domainValue\":\"0\",\"description\":\"x\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores.domainValue").value("debe ser un numero entero entre 1 y 1000"))
+                .andExpect(cumpleContrato());
+        llamar(put("/api/v1/dominios/1"), admin(), "{\"domainValue\":\"\"}")
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void docenteNoAdministraDominios() throws Exception {
+        llamar(get("/api/v1/dominios"), docente(), null).andExpect(status().isForbidden()).andExpect(cumpleContrato());
+    }
+
     // ---------- Seguridad ----------
 
     @Test
@@ -349,6 +430,10 @@ class UserContratoTest {
     }
 
     // ---------- helpers ----------
+
+    private static DominioResponse loginIntentos() {
+        return DominioMock.response(1, ConstantesDominio.GRUPO_AUTH, ConstantesDominio.LOGIN_INTENTOS, "10", true);
+    }
 
     private static MockMultipartFile archivoCsv() {
         return new MockMultipartFile("archivo", "padron.csv", "text/csv",

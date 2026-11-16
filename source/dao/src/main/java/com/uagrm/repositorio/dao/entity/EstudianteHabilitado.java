@@ -39,10 +39,11 @@ public class EstudianteHabilitado {
     @Column(nullable = false, unique = true)
     private Integer registro;
 
-    @NotNull
-    @Positive
-    @Column(nullable = false, unique = true)
-    private Integer ci;
+    /** Texto con complemento opcional (1234567-1A); sin espacios y en mayusculas (ver CarnetIdentidad). */
+    @NotBlank
+    @Size(max = CarnetIdentidad.LONGITUD_MAXIMA)
+    @Column(nullable = false, unique = true, length = CarnetIdentidad.LONGITUD_MAXIMA)
+    private String ci;
 
     @NotBlank
     @Email

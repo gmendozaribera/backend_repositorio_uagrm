@@ -113,10 +113,10 @@ class UsuarioServiceTest {
         esperar(HttpStatus.CONFLICT, () -> service.crear(crear("doc.ana", TipoUsuario.DOCENTE, null, null)));
 
         when(usuarioRepository.existsByUsuario("doc.ana")).thenReturn(false);
-        when(personaRepository.existsByCiAndIdPersonaNot(4443332, 0)).thenReturn(true);
+        when(personaRepository.existsByCiAndIdPersonaNot("4443332", 0)).thenReturn(true);
         esperar(HttpStatus.CONFLICT, () -> service.crear(crear("doc.ana", TipoUsuario.DOCENTE, null, null)));
 
-        when(personaRepository.existsByCiAndIdPersonaNot(4443332, 0)).thenReturn(false);
+        when(personaRepository.existsByCiAndIdPersonaNot("4443332", 0)).thenReturn(false);
         when(personaRepository.existsByCorreoIgnoreCaseAndIdPersonaNot("ana.rios@uagrm.edu.bo", 0)).thenReturn(true);
         esperar(HttpStatus.CONFLICT, () -> service.crear(crear("doc.ana", TipoUsuario.DOCENTE, null, null)));
 
@@ -191,15 +191,93 @@ class UsuarioServiceTest {
         verify(revocacionTokenService).revocarTodosDesde(eq(ID_DOCENTE), any());
     }
 
+    // ---------- CI como texto ----------
+
+    @Test
+    void ciConComplementoSeGuardaSinEspaciosYEnMayusculas() {
+        CrearUsuarioRequest request = new CrearUsuarioRequest("doc.ana", "Inicial2026", TipoUsuario.DOCENTE, "Ana",
+                "Rios", "4443332-1a", "ana.rios@uagrm.edu.bo", "+59170012345", null, null, null);
+
+        UsuarioResponse creado = service.crear(request);
+
+        assertThat(creado.ci()).isEqualTo("4443332-1A");
+        assertThat(creado.celular()).isEqualTo("+59170012345");
+        verify(personaRepository).existsByCiAndIdPersonaNot("4443332-1A", 0);
+    }
+
+    // ---------- un estudiante siempre tiene carrera y registro ----------
+
+    @Test
+    void registroEIdCarreraOmitidosConservanLosActuales() {
+        Usuario estudiante = estudiante();
+
+        UsuarioResponse actualizado = service.actualizar(jwt(ID_ADMIN), ID_ESTUDIANTE,
+                new ActualizarUsuarioRequest(TipoUsuario.ESTUDIANTE, "Juan", "Perez", "7654321",
+                        "est.juan@uagrm.edu.bo", null, null, null, null, null));
+
+        assertThat(actualizado.registro()).isEqualTo(219000111);
+        assertThat(actualizado.idCarrera()).isEqualTo(inf.getIdCarrera());
+        assertThat(estudiante.getPersona().getRegistro()).isEqualTo(219000111);
+        assertThat(estudiante.getPersona().getCarrera()).isSameAs(inf);
+    }
+
+    @Test
+    void registroEIdCarreraEnviadosSeCambian() {
+        estudiante();
+        Carrera sis = CatalogoMock.carrera(CatalogoMock.facultad());
+        sis.setIdCarrera(11);
+        sis.setSigla("SIS");
+        when(carreraRepository.findById(11)).thenReturn(Optional.of(sis));
+
+        UsuarioResponse actualizado = service.actualizar(jwt(ID_ADMIN), ID_ESTUDIANTE,
+                new ActualizarUsuarioRequest(TipoUsuario.ESTUDIANTE, "Juan", "Perez", "7654321",
+                        "est.juan@uagrm.edu.bo", null, null, 219000222, 11, null));
+
+        assertThat(actualizado.registro()).isEqualTo(219000222);
+        assertThat(actualizado.siglaCarrera()).isEqualTo("SIS");
+    }
+
+    @Test
+    void pasarAEstudianteSinCarreraNiRegistroDevuelve400() {
+        esperar(HttpStatus.BAD_REQUEST, () -> service.actualizar(jwt(ID_ADMIN), ID_DOCENTE,
+                actualizar(TipoUsuario.ESTUDIANTE, null)));
+        esperar(HttpStatus.BAD_REQUEST, () -> service.actualizar(jwt(ID_ADMIN), ID_DOCENTE,
+                new ActualizarUsuarioRequest(TipoUsuario.ESTUDIANTE, "Maria", "Lopez Suarez", "7654321",
+                        "doc.maria@uagrm.edu.bo", null, null, 219000333, null, null)));
+        assertThat(docente.getTipoUsuario().getNombre()).isEqualTo(TipoUsuario.DOCENTE);
+        assertThat(docente.getPersona().getRegistro()).isNull();
+    }
+
+    @Test
+    void pasarAEstudianteConCarreraYRegistro() {
+        UsuarioResponse actualizado = service.actualizar(jwt(ID_ADMIN), ID_DOCENTE,
+                new ActualizarUsuarioRequest(TipoUsuario.ESTUDIANTE, "Maria", "Lopez Suarez", "7654321",
+                        "doc.maria@uagrm.edu.bo", null, null, 219000333, inf.getIdCarrera(), null));
+
+        assertThat(actualizado.rol()).isEqualTo(TipoUsuario.ESTUDIANTE);
+        assertThat(actualizado.registro()).isEqualTo(219000333);
+        assertThat(actualizado.siglaCarrera()).isEqualTo("INF");
+    }
+
     // ---------- helpers ----------
 
+    private static final int ID_ESTUDIANTE = 7;
+
+    private Usuario estudiante() {
+        Usuario estudiante = UsuarioMock.usuario(ID_ESTUDIANTE, "est.juan", TipoUsuario.ESTUDIANTE);
+        estudiante.getPersona().setRegistro(219000111);
+        estudiante.getPersona().setCarrera(inf);
+        when(usuarioRepository.findDetalleByIdUsuario(ID_ESTUDIANTE)).thenReturn(Optional.of(estudiante));
+        return estudiante;
+    }
+
     private static CrearUsuarioRequest crear(String usuario, String rol, Integer registro, Integer idCarrera) {
-        return new CrearUsuarioRequest(usuario, "Inicial2026", rol, " Ana ", "Rios", 4443332,
+        return new CrearUsuarioRequest(usuario, "Inicial2026", rol, " Ana ", "Rios", "4443332",
                 "Ana.Rios@UAGRM.edu.bo", null, null, registro, idCarrera);
     }
 
     private static ActualizarUsuarioRequest actualizar(String rol, Integer estado) {
-        return new ActualizarUsuarioRequest(rol, "Maria", "Lopez Suarez", 7654321, "doc.maria@uagrm.edu.bo",
+        return new ActualizarUsuarioRequest(rol, "Maria", "Lopez Suarez", "7654321", "doc.maria@uagrm.edu.bo",
                 null, null, null, null, estado);
     }
 

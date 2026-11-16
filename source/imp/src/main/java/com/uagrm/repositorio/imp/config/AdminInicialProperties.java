@@ -2,8 +2,7 @@ package com.uagrm.repositorio.imp.config;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -17,7 +16,7 @@ public record AdminInicialProperties(
         @NotBlank String usuario,
         @NotBlank String password,
         @NotBlank @Email String correo,
-        @NotNull @Positive Integer ci) {
+        @NotBlank @Size(max = 20) String ci) {
 
     @Configuration
     @ConditionalOnProperty(prefix = "app.admin-inicial", name = "habilitado", havingValue = "true")

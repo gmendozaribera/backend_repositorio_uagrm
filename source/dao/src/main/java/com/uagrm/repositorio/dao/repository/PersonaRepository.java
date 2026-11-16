@@ -9,11 +9,11 @@ import org.springframework.data.jpa.repository.Query;
 
 public interface PersonaRepository extends JpaRepository<Persona, Integer> {
 
-    Optional<Persona> findByCi(Integer ci);
+    Optional<Persona> findByCi(String ci);
 
     Optional<Persona> findByCorreo(String correo);
 
-    boolean existsByCi(Integer ci);
+    boolean existsByCi(String ci);
 
     boolean existsByRegistro(Integer registro);
 
@@ -21,7 +21,7 @@ public interface PersonaRepository extends JpaRepository<Persona, Integer> {
 
     // Duplicados "que no sea la misma persona": en una creacion idExcluido = 0.
 
-    boolean existsByCiAndIdPersonaNot(Integer ci, Integer idExcluido);
+    boolean existsByCiAndIdPersonaNot(String ci, Integer idExcluido);
 
     boolean existsByRegistroAndIdPersonaNot(Integer registro, Integer idExcluido);
 
@@ -32,5 +32,5 @@ public interface PersonaRepository extends JpaRepository<Persona, Integer> {
     List<Integer> findRegistrosExistentes(Collection<Integer> registros);
 
     /** Importacion del padron: personas con estos CI (un CI no puede pertenecer a otro registro). */
-    List<Persona> findByCiIn(Collection<Integer> cis);
+    List<Persona> findByCiIn(Collection<String> cis);
 }

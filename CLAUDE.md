@@ -33,7 +33,8 @@ healthcheck de auth-service.
 ## Estructura
 - `source/dao` — entidades JPA, repositorios, migraciones Flyway (`src/main/resources/db/migration`)
 - `source/dto` — records Request/Response + mappers MapStruct
-- `source/imp` — servicios, Redis (`imp.redis`, keys solo en `ClavesRedis`), seguridad compartida, `GlobalExceptionHandler`
+- `source/imp` — servicios, Redis (`imp.redis`, keys solo en `ClavesRedis`), seguridad compartida, `GlobalExceptionHandler`,
+  parametros de dominio (`imp.dominio`: `ConstantesDominio` + `ParametrosService`)
 - `source/spec` — contratos OpenAPI · `source/mockup` — builders para tests
 - `source/ws/<servicio>` — `SecurityFilterChain` + controllers. Las `Application` viven en el paquete raíz `com.uagrm.repositorio`.
 

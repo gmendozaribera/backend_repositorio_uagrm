@@ -1,8 +1,8 @@
 package com.uagrm.repositorio.dto.usuario;
 
+import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
@@ -22,9 +22,13 @@ public record CrearUsuarioRequest(
         @NotBlank @Pattern(regexp = ReglasUsuario.PATRON, message = ReglasUsuario.MENSAJE) String rol,
         @NotBlank @Size(max = 100) String nombre,
         @NotBlank @Size(max = 100) String apellidos,
-        @NotNull @Positive Integer ci,
+        @NotBlank
+        @Size(min = 4, max = CarnetIdentidad.LONGITUD_MAXIMA)
+        @Pattern(regexp = CarnetIdentidad.PATRON, message = CarnetIdentidad.MENSAJE)
+        String ci,
         @NotBlank @Email @Size(max = 150) String correo,
-        @Positive Integer celular,
+        @Size(max = 20) @Pattern(regexp = CarnetIdentidad.PATRON_CELULAR, message = CarnetIdentidad.MENSAJE_CELULAR)
+        String celular,
         @Past LocalDate fechaNac,
         @Positive Integer registro,
         @Positive Integer idCarrera) {

@@ -55,6 +55,11 @@ app:
       max-intentos: 5
     cors-origenes: ${CORS_ORIGENES:http://localhost:4200}
 
+  # Tabla de dominio: /api/v1/dominios borra la cache config:dominio:{GRUPO} en cada escritura
+  dominio:
+    cache:
+      ttl: ${DOMINIO_CACHE_TTL:600s}
+
 management:
   endpoints:
     web:

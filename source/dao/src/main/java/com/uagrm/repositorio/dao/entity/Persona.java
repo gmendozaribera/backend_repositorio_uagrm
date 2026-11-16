@@ -11,7 +11,6 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -41,10 +40,11 @@ public class Persona {
     @Column(nullable = false, length = 100)
     private String apellidos;
 
-    @NotNull
-    @Positive
-    @Column(nullable = false, unique = true)
-    private Integer ci;
+    /** Texto con complemento opcional (1234567-1A); sin espacios y en mayusculas (ver CarnetIdentidad). */
+    @NotBlank
+    @Size(max = CarnetIdentidad.LONGITUD_MAXIMA)
+    @Column(nullable = false, unique = true, length = CarnetIdentidad.LONGITUD_MAXIMA)
+    private String ci;
 
     @NotBlank
     @Email
@@ -52,8 +52,9 @@ public class Persona {
     @Column(nullable = false, unique = true, length = 150)
     private String correo;
 
-    @Positive
-    private Integer celular;
+    @Size(max = 20)
+    @Column(length = 20)
+    private String celular;
 
     @Past
     private LocalDate fechaNac;

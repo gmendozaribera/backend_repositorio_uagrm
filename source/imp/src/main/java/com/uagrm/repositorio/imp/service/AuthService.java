@@ -16,6 +16,7 @@ import com.uagrm.repositorio.dto.mapper.UsuarioMapper;
 import com.uagrm.repositorio.imp.config.SeguridadProperties;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.DosFactoresPendienteService;
+import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.TotpService;
@@ -46,13 +47,30 @@ public class AuthService {
     private final TotpService totpService;
     private final RevocacionTokenService revocacionTokenService;
     private final DosFactoresPendienteService dosFactoresPendienteService;
+    private final LimiteIntentosService limiteIntentos;
     private final UsuarioMapper usuarioMapper;
     private final SeguridadProperties props;
 
     private volatile String hashFicticio;
 
+    /**
+     * Login con limite de intentos fallidos por IP: si la IP ya agoto sus intentos responde 429 sin mirar la
+     * contrasena; cada 401 (usuario o contrasena incorrectos) suma un intento. Los exitosos no cuentan.
+     */
     @Transactional(readOnly = true)
-    public LoginResponse login(LoginRequest request) {
+    public LoginResponse login(LoginRequest request, String ip) {
+        limiteIntentos.verificar(LimiteIntentosService.Operacion.LOGIN, ip);
+        try {
+            return autenticar(request);
+        } catch (NegocioException ex) {
+            if (ex.getStatus() == HttpStatus.UNAUTHORIZED) {
+                limiteIntentos.registrarFallo(LimiteIntentosService.Operacion.LOGIN, ip);
+            }
+            throw ex;
+        }
+    }
+
+    private LoginResponse autenticar(LoginRequest request) {
         Optional<Usuario> encontrado = usuarioRepository.findByUsuario(request.usuario());
         if (encontrado.isEmpty()) {
             passwordEncoder.matches(request.password(), hashFicticio());

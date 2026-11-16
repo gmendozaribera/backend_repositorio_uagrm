@@ -1,5 +1,6 @@
 package com.uagrm.repositorio.imp.service.usuario;
 
+import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.Carrera;
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.Persona;
@@ -80,10 +81,11 @@ public class UsuarioService {
         exigirDatosDeEstudiante(rol, request.registro(), request.idCarrera());
 
         String correo = correo(request.correo());
-        validarDuplicados(request.ci(), correo, request.registro(), 0);
+        String ci = CarnetIdentidad.normalizar(request.ci());
+        validarDuplicados(ci, correo, request.registro(), 0);
         Persona persona = new Persona();
         mapper.actualizar(request, persona);
-        normalizar(persona, correo);
+        normalizar(persona, ci, correo);
         persona.setCarrera(carrera(request.idCarrera(), null));
         personaRepository.save(persona);
 
@@ -98,7 +100,11 @@ public class UsuarioService {
         return mapper.toResponse(usuarioRepository.save(usuario));
     }
 
-    /** El login no cambia. Cambiar el rol o desactivar cierra todas las sesiones del usuario. */
+    /**
+     * El login no cambia. registro e idCarrera null conservan el valor actual: un ESTUDIANTE siempre queda con
+     * carrera y registro (400 si al pasar a ESTUDIANTE no los tiene). Cambiar el rol o desactivar cierra todas
+     * las sesiones del usuario.
+     */
     @Transactional
     public UsuarioResponse actualizar(Jwt admin, Integer id, ActualizarUsuarioRequest request) {
         Usuario usuario = buscar(id);
@@ -114,16 +120,22 @@ public class UsuarioService {
                 throw datosInvalidos("No puede quitarse el rol ADMIN a si mismo.");
             }
         }
-        exigirDatosDeEstudiante(rol, request.registro(), request.idCarrera());
+        // Valores que quedarian despues del cambio (null = se conserva el actual), validados antes de tocar la entidad
+        Persona persona = usuario.getPersona();
+        Carrera carreraActual = persona.getCarrera();
+        Integer registroFinal = request.registro() != null ? request.registro() : persona.getRegistro();
+        Integer idCarreraFinal = request.idCarrera() != null ? request.idCarrera()
+                : carreraActual == null ? null : carreraActual.getIdCarrera();
+        exigirDatosDeEstudiante(rol, registroFinal, idCarreraFinal);
 
         // Duplicados antes de tocar la entidad: la consulta no debe disparar un flush con datos repetidos
-        Persona persona = usuario.getPersona();
         String correo = correo(request.correo());
-        validarDuplicados(request.ci(), correo, request.registro(), persona.getIdPersona());
-        Carrera carreraActual = persona.getCarrera();
+        String ci = CarnetIdentidad.normalizar(request.ci());
+        validarDuplicados(ci, correo, request.registro(), persona.getIdPersona());
+        Carrera carrera = carrera(idCarreraFinal, carreraActual);
         mapper.actualizar(request, persona);
-        normalizar(persona, correo);
-        persona.setCarrera(carrera(request.idCarrera(), carreraActual));
+        normalizar(persona, ci, correo);
+        persona.setCarrera(carrera);
 
         usuario.setTipoUsuario(rol);
         if (request.estado() != null) {
@@ -196,7 +208,7 @@ public class UsuarioService {
         return carrera;
     }
 
-    private void validarDuplicados(Integer ci, String correo, Integer registro, Integer idExcluido) {
+    private void validarDuplicados(String ci, String correo, Integer registro, Integer idExcluido) {
         if (personaRepository.existsByCiAndIdPersonaNot(ci, idExcluido)) {
             throw NegocioException.conflicto("Ya existe una persona con el CI " + ci + ".");
         }
@@ -213,7 +225,9 @@ public class UsuarioService {
         return correo.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static void normalizar(Persona persona, String correo) {
+    /** CI sin espacios y en mayusculas ("1234567-1a" = "1234567-1A"); nombres sin espacios a los lados. */
+    private static void normalizar(Persona persona, String ci, String correo) {
+        persona.setCi(ci);
         persona.setNombre(persona.getNombre().trim());
         persona.setApellidos(persona.getApellidos().trim());
         persona.setCorreo(correo);

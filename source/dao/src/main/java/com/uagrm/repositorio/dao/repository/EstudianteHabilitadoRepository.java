@@ -16,7 +16,7 @@ public interface EstudianteHabilitadoRepository
 
     /** Auto-registro: el estudiante envia su CI y su registro; ambos deben coincidir en la misma fila. */
     @EntityGraph(attributePaths = "carrera")
-    Optional<EstudianteHabilitado> findByCiAndRegistro(Integer ci, Integer registro);
+    Optional<EstudianteHabilitado> findByCiAndRegistro(String ci, Integer registro);
 
     /** Listado paginado: trae la carrera en la misma consulta (siglaCarrera). */
     @Override
@@ -30,5 +30,5 @@ public interface EstudianteHabilitadoRepository
     List<EstudianteHabilitado> findByRegistroIn(Collection<Integer> registros);
 
     /** Importacion: un CI no puede pertenecer a dos registros distintos. */
-    List<EstudianteHabilitado> findByCiIn(Collection<Integer> cis);
+    List<EstudianteHabilitado> findByCiIn(Collection<String> cis);
 }

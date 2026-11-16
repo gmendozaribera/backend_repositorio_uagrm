@@ -1,5 +1,6 @@
 package com.uagrm.repositorio.dao.specification;
 
+import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.EstudianteHabilitado;
 import com.uagrm.repositorio.dao.entity.Persona;
 import com.uagrm.repositorio.dao.entity.Usuario;
@@ -25,7 +26,7 @@ public final class UsuarioSpecs {
 
     /**
      * Texto libre: contiene (sin distinguir mayusculas) en usuario, nombre, apellidos o correo;
-     * si es numerico, ademas igualdad en CI o registro.
+     * igualdad en CI (texto normalizado: sin espacios y en mayusculas) y, si es numerico, igualdad en registro.
      */
     public static Specification<Usuario> texto(String q) {
         return (root, query, cb) -> {
@@ -39,9 +40,9 @@ public final class UsuarioSpecs {
                     contiene(cb, persona.get("nombre"), patron),
                     contiene(cb, persona.get("apellidos"), patron),
                     contiene(cb, persona.get("correo"), patron)));
+            opciones.add(cb.equal(persona.get("ci"), CarnetIdentidad.normalizar(q)));
             Integer numero = numero(q);
             if (numero != null) {
-                opciones.add(cb.equal(persona.get("ci"), numero));
                 opciones.add(cb.equal(persona.get("registro"), numero));
             }
             return cb.or(opciones.toArray(Predicate[]::new));
@@ -62,7 +63,7 @@ public final class UsuarioSpecs {
 
     // ---------- Padron ----------
 
-    /** Texto libre: contiene en nombres, apellidos o correo; si es numerico, igualdad en CI o registro. */
+    /** Texto libre: contiene en nombres, apellidos o correo; igualdad en CI (normalizado) y en registro si es numerico. */
     public static Specification<EstudianteHabilitado> textoPadron(String q) {
         return (root, query, cb) -> {
             String patron = patron(q);
@@ -73,9 +74,9 @@ public final class UsuarioSpecs {
                     contiene(cb, root.get("nombres"), patron),
                     contiene(cb, root.get("apellidos"), patron),
                     contiene(cb, root.get("correo"), patron)));
+            opciones.add(cb.equal(root.get("ci"), CarnetIdentidad.normalizar(q)));
             Integer numero = numero(q);
             if (numero != null) {
-                opciones.add(cb.equal(root.get("ci"), numero));
                 opciones.add(cb.equal(root.get("registro"), numero));
             }
             return cb.or(opciones.toArray(Predicate[]::new));

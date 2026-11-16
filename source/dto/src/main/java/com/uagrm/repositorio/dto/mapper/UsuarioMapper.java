@@ -11,6 +11,7 @@ import com.uagrm.repositorio.dto.usuario.UsuarioResponse;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
+import org.mapstruct.NullValuePropertyMappingStrategy;
 
 /**
  * Mapeos de usuarios. La contrasena, el rol, la carrera y el login no se copian desde los requests:
@@ -46,8 +47,12 @@ public interface UsuarioMapper {
     @Mapping(target = "carrera", ignore = true)
     void actualizar(CrearUsuarioRequest request, @MappingTarget Persona persona);
 
-    /** PUT: celular, fechaNac y registro null se borran (SET_TO_NULL por defecto). */
+    /**
+     * PUT: celular y fechaNac null se borran (SET_TO_NULL por defecto); registro null CONSERVA el actual
+     * (un estudiante nunca queda sin registro). La carrera la resuelve el service.
+     */
     @Mapping(target = "idPersona", ignore = true)
     @Mapping(target = "carrera", ignore = true)
+    @Mapping(target = "registro", nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
     void actualizar(ActualizarUsuarioRequest request, @MappingTarget Persona persona);
 }

@@ -36,7 +36,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleNegocio(NegocioException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         problem.setTitle(ex.getTitle());
+        if (ex.getErrores() != null) {
+            problem.setProperty("errores", ex.getErrores());
+        }
         return conTimestamp(problem);
+    }
+
+    /** 429 por intentos fallidos: el cliente sabe cuantos segundos esperar por la cabecera Retry-After. */
+    @ExceptionHandler(LimiteIntentosException.class)
+    public ResponseEntity<ProblemDetail> handleLimiteIntentos(LimiteIntentosException ex) {
+        return ResponseEntity.status(ex.getStatus())
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(ex.getRetryAfterSegundos()))
+                .body(handleNegocio(ex));
     }
 
     /**

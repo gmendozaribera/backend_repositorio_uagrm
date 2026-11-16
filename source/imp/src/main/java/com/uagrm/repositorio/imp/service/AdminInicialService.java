@@ -1,5 +1,6 @@
 package com.uagrm.repositorio.imp.service;
 
+import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.Persona;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
@@ -44,7 +45,7 @@ public class AdminInicialService implements ApplicationRunner {
         Persona persona = new Persona();
         persona.setNombre("Administrador");
         persona.setApellidos("del Sistema");
-        persona.setCi(props.ci());
+        persona.setCi(CarnetIdentidad.normalizar(props.ci()));
         persona.setCorreo(props.correo());
         personaRepository.save(persona);
 

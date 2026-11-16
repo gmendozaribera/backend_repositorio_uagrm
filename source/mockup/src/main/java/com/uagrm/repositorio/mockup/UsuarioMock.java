@@ -26,7 +26,7 @@ public final class UsuarioMock {
         persona.setIdPersona(id);
         persona.setNombre("Juan");
         persona.setApellidos("Perez");
-        persona.setCi(7654321);
+        persona.setCi("7654321");
         persona.setCorreo(nombreUsuario + "@uagrm.edu.bo");
 
         Usuario usuario = new Usuario();

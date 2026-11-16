@@ -118,7 +118,23 @@ class PadronServiceTest {
                 new ErrorImportacion(3, "sigla_carrera", "No existe una carrera activa con la sigla XYZ."));
         EstudianteHabilitado juan = guardados().get(0);
         assertThat(juan.getRegistro()).isEqualTo(219012345);
+        // Celda numerica 7654321.0 -> CI "7654321" (sin ".0" ni notacion cientifica)
+        assertThat(juan.getCi()).isEqualTo("7654321");
         assertThat(juan.getPasswordDefault()).isEqualTo("$2a$10$hash-123456");
+    }
+
+    @Test
+    void ciConComplementoSeGuardaSinEspaciosYEnMayusculasYElInvalidoSeRechaza() {
+        String csv = PadronMock.CABECERA + "\n"
+                + "219012345, 1234567-1a ,juan@uagrm.edu.bo,Uagrm2026,Juan,Perez,INF\n"
+                + "219012346,12-AB,ana@uagrm.edu.bo,Uagrm2026,Ana,Rios,INF\n";
+
+        ResultadoImportacion resultado = importar("padron.csv", csv.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(resultado.insertados()).isEqualTo(1);
+        assertThat(guardados().get(0).getCi()).isEqualTo("1234567-1A");
+        assertThat(resultado.errores()).extracting(ErrorImportacion::fila, ErrorImportacion::columna)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(3, "ci"));
     }
 
     @Test
@@ -205,11 +221,11 @@ class PadronServiceTest {
         existente.setHabilitado(false);
         EstudianteHabilitado otro = PadronMock.estudianteHabilitado(inf, "$2a$10$viejo");
         otro.setRegistro(219000999);
-        otro.setCi(5550001);
+        otro.setCi("5550001");
         when(padronRepository.findByRegistroIn(anyCollection())).thenReturn(List.of(existente));
         when(padronRepository.findByCiIn(anyCollection())).thenReturn(List.of(existente, otro));
         Persona docente = new Persona();
-        docente.setCi(5550002);
+        docente.setCi("5550002");
         when(personaRepository.findByCiIn(anyCollection())).thenReturn(List.of(docente));
 
         String csv = PadronMock.CABECERA + "\n"

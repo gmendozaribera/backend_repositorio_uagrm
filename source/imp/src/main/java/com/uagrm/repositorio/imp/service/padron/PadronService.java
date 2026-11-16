@@ -8,6 +8,7 @@ import static com.uagrm.repositorio.imp.service.padron.LectorPadron.PASSWORD_DEF
 import static com.uagrm.repositorio.imp.service.padron.LectorPadron.REGISTRO;
 import static com.uagrm.repositorio.imp.service.padron.LectorPadron.SIGLA_CARRERA;
 
+import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.Carrera;
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.EstudianteHabilitado;
@@ -113,7 +114,7 @@ public class PadronService {
     // ---------- importacion ----------
 
     /** Fila que paso la validacion individual, lista para el upsert. */
-    private record FilaValida(int fila, Integer registro, Integer ci, String correo, String password,
+    private record FilaValida(int fila, Integer registro, String ci, String correo, String password,
                               String nombres, String apellidos, Carrera carrera) {
     }
 
@@ -124,14 +125,14 @@ public class PadronService {
 
         // Validaciones contra la BD, en bloque (una consulta por tipo, no una por fila)
         List<Integer> registros = validas.stream().map(FilaValida::registro).toList();
-        List<Integer> cis = validas.stream().map(FilaValida::ci).toList();
+        List<String> cis = validas.stream().map(FilaValida::ci).toList();
         Map<Integer, EstudianteHabilitado> existentes = registros.isEmpty() ? Map.of()
                 : padronRepository.findByRegistroIn(registros).stream()
                         .collect(Collectors.toMap(EstudianteHabilitado::getRegistro, Function.identity()));
-        Map<Integer, Integer> registroDelCiEnPadron = cis.isEmpty() ? Map.of()
+        Map<String, Integer> registroDelCiEnPadron = cis.isEmpty() ? Map.of()
                 : padronRepository.findByCiIn(cis).stream()
                         .collect(Collectors.toMap(EstudianteHabilitado::getCi, EstudianteHabilitado::getRegistro));
-        Map<Integer, Persona> personaDelCi = cis.isEmpty() ? Map.of()
+        Map<String, Persona> personaDelCi = cis.isEmpty() ? Map.of()
                 : personaRepository.findByCiIn(cis).stream()
                         .collect(Collectors.toMap(Persona::getCi, Function.identity()));
 
@@ -185,13 +186,13 @@ public class PadronService {
                                           Set<Integer> filasConError) {
         Map<String, Carrera> carreras = carreraRepository.findAll().stream()
                 .collect(Collectors.toMap(c -> c.getSigla().toUpperCase(Locale.ROOT), Function.identity(), (a, b) -> a));
-        Map<Integer, Integer> filaDelRegistro = new HashMap<>();
-        Map<Integer, Integer> filaDelCi = new HashMap<>();
+        Map<Object, Integer> filaDelRegistro = new HashMap<>();
+        Map<Object, Integer> filaDelCi = new HashMap<>();
         List<FilaValida> validas = new ArrayList<>();
         for (FilaPadron fila : filas) {
             List<ErrorImportacion> propios = new ArrayList<>();
             Integer registro = entero(fila, REGISTRO, propios);
-            Integer ci = entero(fila, CI, propios);
+            String ci = ci(fila, propios);
             String correo = correo(fila, propios);
             String password = password(fila, propios);
             String nombres = texto(fila, NOMBRES, propios);
@@ -220,6 +221,24 @@ public class PadronService {
         errores.add(new ErrorImportacion(fila.fila(), columna,
                 valor.isEmpty() ? "Es obligatorio." : "Debe ser un numero entero positivo: " + valor + "."));
         return null;
+    }
+
+    /**
+     * CI como texto: sin espacios y en MAYUSCULAS, con el patron del contrato (1234567 o 1234567-1A).
+     * Una celda numerica de Excel ya llega como "7654321" (LectorPadron quita el ".0").
+     */
+    private static String ci(FilaPadron fila, List<ErrorImportacion> errores) {
+        String ci = CarnetIdentidad.normalizar(fila.valor(CI));
+        if (ci.isEmpty()) {
+            errores.add(new ErrorImportacion(fila.fila(), CI, "Es obligatorio."));
+            return null;
+        }
+        if (!CarnetIdentidad.esValido(ci)) {
+            errores.add(new ErrorImportacion(fila.fila(), CI,
+                    "No es un CI valido: " + ci + " (4 a 12 digitos con complemento opcional, p. ej. 1234567-1A)."));
+            return null;
+        }
+        return ci;
     }
 
     /** Usa las mismas reglas de Bean Validation de la entidad (@Email, @Size 150). Se guarda en minusculas. */
@@ -275,7 +294,7 @@ public class PadronService {
         return carrera;
     }
 
-    private static void repetido(FilaPadron fila, String columna, Integer valor, Map<Integer, Integer> vistos,
+    private static void repetido(FilaPadron fila, String columna, Object valor, Map<Object, Integer> vistos,
                                  List<ErrorImportacion> errores) {
         if (valor == null) {
             return;

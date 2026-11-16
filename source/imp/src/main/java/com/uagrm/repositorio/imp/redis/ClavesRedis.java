@@ -7,8 +7,27 @@ public final class ClavesRedis {
 
     private static final String AUTH = "auth:";
     private static final String CATALOGO = "catalog:cache:";
+    private static final String DOMINIO = "config:dominio:";
 
     private ClavesRedis() {
+    }
+
+    /**
+     * config:dominio:{GRUPO} → HASH domain_name → domain_value con todos los parametros del grupo.
+     * TTL: app.dominio.cache.ttl (600 s). Compartida por todos los servicios; se borra en cada escritura.
+     */
+    public static String dominio(String grupo) {
+        return DOMINIO + grupo;
+    }
+
+    /** auth:rate:login:{ip} → intentos de login FALLIDOS desde esa IP. TTL: LOGIN_WAITING minutos desde el primero. */
+    public static String limiteLogin(String ip) {
+        return AUTH + "rate:login:" + ip;
+    }
+
+    /** auth:rate:register:{ip} → intentos de auto-registro FALLIDOS (404/409) desde esa IP. TTL: LOGIN_WAITING minutos. */
+    public static String limiteRegistro(String ip) {
+        return AUTH + "rate:register:" + ip;
     }
 
     /**

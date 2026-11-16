@@ -1,5 +1,6 @@
 package com.uagrm.repositorio.imp.service;
 
+import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.EstudianteHabilitado;
 import com.uagrm.repositorio.dao.entity.Persona;
@@ -12,6 +13,7 @@ import com.uagrm.repositorio.dao.repository.UsuarioRepository;
 import com.uagrm.repositorio.dto.auth.RegistroRequest;
 import com.uagrm.repositorio.dto.auth.RegistroResponse;
 import com.uagrm.repositorio.imp.exception.NegocioException;
+import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -34,10 +36,28 @@ public class RegistroService {
     private final PersonaRepository personaRepository;
     private final UsuarioRepository usuarioRepository;
     private final TipoUsuarioRepository tipoUsuarioRepository;
+    private final LimiteIntentosService limiteIntentos;
 
+    /**
+     * Limite de intentos por IP: si la IP ya agoto sus intentos responde 429; cada 404 (no esta en el padron) o
+     * 409 (cuenta existente) suma uno. Asi nadie puede recorrer el padron probando combinaciones de CI y registro.
+     */
     @Transactional
-    public RegistroResponse registrar(RegistroRequest request) {
-        EstudianteHabilitado padron = padronRepository.findByCiAndRegistro(request.ci(), request.registro())
+    public RegistroResponse registrar(RegistroRequest request, String ip) {
+        limiteIntentos.verificar(LimiteIntentosService.Operacion.REGISTRO, ip);
+        try {
+            return crearCuenta(request);
+        } catch (NegocioException ex) {
+            if (ex.getStatus() == HttpStatus.NOT_FOUND || ex.getStatus() == HttpStatus.CONFLICT) {
+                limiteIntentos.registrarFallo(LimiteIntentosService.Operacion.REGISTRO, ip);
+            }
+            throw ex;
+        }
+    }
+
+    private RegistroResponse crearCuenta(RegistroRequest request) {
+        String ci = CarnetIdentidad.normalizar(request.ci());
+        EstudianteHabilitado padron = padronRepository.findByCiAndRegistro(ci, request.registro())
                 .filter(fila -> Boolean.TRUE.equals(fila.getHabilitado()))
                 .orElseThrow(() -> new NegocioException(HttpStatus.NOT_FOUND, "No encontrado en el padron", NO_EN_PADRON));
 

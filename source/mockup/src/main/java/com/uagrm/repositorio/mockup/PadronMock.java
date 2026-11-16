@@ -16,7 +16,7 @@ import java.util.List;
 public final class PadronMock {
 
     public static final int REGISTRO = 219012345;
-    public static final int CI = 7654321;
+    public static final String CI = "7654321";
     public static final String CABECERA = "registro,ci,correo,password_default,nombres,apellidos,sigla_carrera";
 
     private PadronMock() {
@@ -54,7 +54,7 @@ public final class PadronMock {
 
     public static UsuarioResponse docenteResponse() {
         return new UsuarioResponse(5, "doc.maria", "DOCENTE", Estado.ACTIVO, true, false, 5, "Maria",
-                "Lopez Suarez", 5554443, "maria.lopez@uagrm.edu.bo", 70012345, LocalDate.of(1990, 5, 14),
+                "Lopez Suarez", "5554443", "maria.lopez@uagrm.edu.bo", "70012345", LocalDate.of(1990, 5, 14),
                 null, null, null);
     }
 
