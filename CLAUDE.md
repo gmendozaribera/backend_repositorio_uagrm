@@ -64,3 +64,8 @@ Todo cambio de API empieza editando el YAML; después el código.
 8. CORS solo para el origen del frontend. Config externalizable por variables de entorno (ConfigMap/Secret).
 9. Mínimo un test unitario por servicio; integración con Testcontainers (PostgreSQL, MinIO, Redis) en repos críticos.
 10. El usuario tiene poca experiencia en seguridad: explicar las decisiones de seguridad en términos simples.
+11. **Todo parámetro configurable del sistema se registra en la tabla `dominio`** (`domain_group`, `domain_name`,
+    `domain_value`, `description`) con una migración Flyway que lo siembra, y su grupo/nombre se declaran como
+    constantes SOLO en `imp` `ConstantesDominio` (nunca strings sueltos). Se lee con el servicio de dominio
+    (caché Redis `config:dominio:{GRUPO}`, TTL 600 s). Se administra con `/api/v1/dominios` (user-service).
+    Excepción: la infraestructura (URLs, credenciales, secretos, puertos) sigue en variables de entorno.

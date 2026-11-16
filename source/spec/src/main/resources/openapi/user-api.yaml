@@ -1,9 +1,10 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - user-service
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    Gestion de usuarios (personas + cuentas), roles y padron estudiantil (EstudianteHabilitado).
+    Gestion de usuarios (personas + cuentas), roles, padron estudiantil (EstudianteHabilitado) y
+    parametros configurables del sistema (tabla de dominio).
 
     **Contrato fuente de verdad.** El backend lo verifica con tests de contrato
     (`UserContratoTest`) y el frontend genera su cliente TypeScript desde este archivo.
@@ -18,6 +19,10 @@ info:
     - **Listados paginados:** `pagina` empieza en 0; `tamano` entre 1 y 100 (por defecto 20).
     - **Padron:** el auto-registro de estudiantes (`POST /api/v1/auth/register` en auth-service) solo
       acepta CI + registro que existan aqui con `habilitado = true`.
+    - **CI y celular son texto** (el CI puede tener complemento, p. ej. `1234567-1A`).
+    - **Dominio:** todo parametro configurable del sistema vive en la tabla de dominio, agrupado por
+      `domainGroup` + `domainName`. Los servicios lo leen con cache (hasta 10 minutos); toda escritura invalida
+      la cache del grupo al instante.
 
     Formato de respuestas:
     - Exito: `{ data, message, status, timestamp }`
@@ -37,6 +42,8 @@ tags:
     description: Roles del sistema
   - name: Padron
     description: Padron estudiantil importado (habilita el auto-registro)
+  - name: Dominios
+    description: Parametros configurables del sistema (tabla de dominio)
 
 paths:
   # ---------------------------------------------------------------- Usuarios
@@ -50,7 +57,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Texto libre; busca (sin distinguir mayusculas) en usuario, nombre, apellidos y correo, y por igualdad en CI y registro si es numerico.
+          description: Texto libre; busca (sin distinguir mayusculas) en usuario, nombre, apellidos y correo, por igualdad en CI, y por igualdad en registro si es numerico.
           schema:
             type: string
             maxLength: 100
@@ -155,6 +162,9 @@ paths:
       summary: Actualizar usuario (ADMIN)
       description: |
         Actualiza datos personales, rol y estado. El nombre de usuario (login) no se modifica.
+        `registro` e `idCarrera` omitidos o null **conservan** el valor actual (no se borran).
+        Un ESTUDIANTE siempre debe tener carrera y registro: se mantienen o se cambian, nunca quedan vacios
+        (400 si al pasar a ESTUDIANTE no los tiene).
         Cambiar el rol o desactivar (`estado: 0`) cierra todas las sesiones del usuario.
         Un administrador no puede desactivarse ni quitarse el rol ADMIN a si mismo (400).
       requestBody:
@@ -267,7 +277,7 @@ paths:
         - name: q
           in: query
           required: false
-          description: Texto libre; busca en nombres, apellidos y correo, y por igualdad en CI y registro si es numerico.
+          description: Texto libre; busca en nombres, apellidos y correo, por igualdad en CI, y por igualdad en registro si es numerico.
           schema:
             type: string
             maxLength: 100
@@ -383,6 +393,142 @@ paths:
         '503':
           $ref: '#/components/responses/ServicioNoDisponible'
 
+  # ---------------------------------------------------------------- Dominios
+  /api/v1/dominios:
+    get:
+      tags: [Dominios]
+      operationId: listarDominios
+      summary: Listar parametros de configuracion
+      description: Ordenados por grupo y nombre. Sin paginacion (la tabla es chica).
+      parameters:
+        - name: domainGroup
+          in: query
+          required: false
+          description: Solo los parametros de este grupo (p. ej. AUTH_GROUP).
+          schema:
+            $ref: '#/components/schemas/CodigoDominio'
+      responses:
+        '200':
+          description: Parametros
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaListaDominios'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    post:
+      tags: [Dominios]
+      operationId: crearDominio
+      summary: Crear parametro (ADMIN)
+      description: |
+        `domainGroup` + `domainName` es unico (409 si ya existe). Se guardan en MAYUSCULAS.
+        `lastUser` y `lastTime` los completa el servidor con el administrador autenticado y la hora actual.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrearDominioRequest'
+      responses:
+        '201':
+          description: Parametro creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDominio'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/dominios/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Dominios]
+      operationId: obtenerDominio
+      summary: Obtener parametro
+      responses:
+        '200':
+          description: Parametro
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDominio'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    put:
+      tags: [Dominios]
+      operationId: actualizarDominio
+      summary: Cambiar el valor o la descripcion de un parametro (ADMIN)
+      description: |
+        `domainGroup` y `domainName` no se modifican (el codigo los referencia por nombre).
+        Si el parametro lo usa el sistema, su valor se valida segun su tipo (p. ej. `LOGIN_INTENTOS` debe ser
+        un entero entre 1 y 1000) -> 400. El cambio se aplica en todos los servicios al instante.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActualizarDominioRequest'
+      responses:
+        '200':
+          description: Parametro actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDominio'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Dominios]
+      operationId: eliminarDominio
+      summary: Eliminar parametro (ADMIN)
+      description: Borrado fisico. Los parametros que usa el sistema (`sistema = true`) no se pueden eliminar (409).
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
 security:
   - bearerAuth: []
 
@@ -484,7 +630,7 @@ components:
             instance: /api/v1/usuarios/99
             timestamp: '2026-11-16T14:00:00Z'
     Conflicto:
-      description: Duplicado (usuario, CI, correo, registro) o referencia a un registro inactivo
+      description: Duplicado (usuario, CI, correo, registro, parametro), referencia a un registro inactivo o parametro del sistema que no se puede eliminar
       content:
         application/problem+json:
           schema:
@@ -559,21 +705,24 @@ components:
           maxLength: 100
           example: Lopez Suarez
         ci:
-          type: integer
-          format: int32
-          minimum: 1
-          example: 7654321
+          type: string
+          minLength: 4
+          maxLength: 20
+          pattern: '^[0-9]{4,12}(-?[0-9A-Za-z]{1,3})?$'
+          description: Carnet de identidad, con complemento opcional (p. ej. 1234567 o 1234567-1A). Se guarda sin espacios y en mayusculas.
+          example: 7654321-1A
         correo:
           type: string
           format: email
           maxLength: 150
           example: maria.lopez@uagrm.edu.bo
         celular:
-          type: integer
-          format: int32
-          minimum: 1
+          type: string
           nullable: true
-          example: 70012345
+          maxLength: 20
+          pattern: '^\+?[0-9]{7,15}$'
+          description: Solo digitos, con prefijo internacional opcional (p. ej. 70012345 o +59170012345).
+          example: '70012345'
         fechaNac:
           type: string
           format: date
@@ -591,7 +740,7 @@ components:
           format: int32
           minimum: 1
           nullable: true
-          description: Carrera de la persona. Obligatoria para ESTUDIANTE.
+          description: Carrera de la persona. Obligatoria para ESTUDIANTE (un estudiante nunca queda sin carrera).
           example: 1
     ActualizarUsuarioRequest:
       type: object
@@ -610,21 +759,24 @@ components:
           maxLength: 100
           example: Lopez Suarez
         ci:
-          type: integer
-          format: int32
-          minimum: 1
-          example: 7654321
+          type: string
+          minLength: 4
+          maxLength: 20
+          pattern: '^[0-9]{4,12}(-?[0-9A-Za-z]{1,3})?$'
+          description: Carnet de identidad, con complemento opcional (p. ej. 1234567 o 1234567-1A). Se guarda sin espacios y en mayusculas.
+          example: 7654321-1A
         correo:
           type: string
           format: email
           maxLength: 150
           example: maria.lopez@uagrm.edu.bo
         celular:
-          type: integer
-          format: int32
-          minimum: 1
+          type: string
           nullable: true
-          example: 70012345
+          maxLength: 20
+          pattern: '^\+?[0-9]{7,15}$'
+          description: Solo digitos, con prefijo internacional opcional (p. ej. 70012345 o +59170012345).
+          example: '70012345'
         fechaNac:
           type: string
           format: date
@@ -641,6 +793,7 @@ components:
           format: int32
           minimum: 1
           nullable: true
+          description: Omitido o null conserva la carrera actual.
           example: 1
         estado:
           $ref: '#/components/schemas/EstadoOpcional'
@@ -658,7 +811,77 @@ components:
           type: boolean
           example: false
 
+    CodigoDominio:
+      type: string
+      minLength: 1
+      maxLength: 50
+      pattern: '^[A-Za-z][A-Za-z0-9_]*$'
+      description: Letras, numeros y guion bajo; se guarda en MAYUSCULAS.
+      example: AUTH_GROUP
+    CrearDominioRequest:
+      type: object
+      required: [domainGroup, domainName, domainValue, description]
+      properties:
+        domainGroup:
+          $ref: '#/components/schemas/CodigoDominio'
+        domainName:
+          $ref: '#/components/schemas/CodigoDominio'
+        domainValue:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: '10'
+        description:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Intentos fallidos permitidos por IP antes de bloquear el login y el auto-registro.
+    ActualizarDominioRequest:
+      type: object
+      required: [domainValue, description]
+      properties:
+        domainValue:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: '10'
+        description:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: Intentos fallidos permitidos por IP antes de bloquear el login y el auto-registro.
+
     # ---------- Datos ----------
+    Dominio:
+      type: object
+      required: [domainId, domainGroup, domainName, domainValue, description, lastUser, lastTime, sistema]
+      properties:
+        domainId:
+          $ref: '#/components/schemas/Id'
+        domainGroup:
+          type: string
+          example: AUTH_GROUP
+        domainName:
+          type: string
+          example: LOGIN_INTENTOS
+        domainValue:
+          type: string
+          example: '10'
+        description:
+          type: string
+          example: Intentos fallidos permitidos por IP antes de bloquear el login y el auto-registro.
+        lastUser:
+          type: string
+          description: Usuario (login) que hizo el ultimo cambio; 'sistema' si vino de una migracion.
+          example: admin
+        lastTime:
+          type: string
+          format: date-time
+          example: '2026-11-16T14:00:00Z'
+        sistema:
+          type: boolean
+          description: true si el sistema usa este parametro (no se puede eliminar y su valor se valida).
+          example: true
     Usuario:
       type: object
       required: [idUsuario, usuario, rol, estado, requiereCambioPassword, twoFactorEnabled, idPersona, nombre, apellidos, ci, correo, celular, fechaNac, registro, idCarrera, siglaCarrera]
@@ -687,18 +910,16 @@ components:
           type: string
           example: Lopez Suarez
         ci:
-          type: integer
-          format: int32
-          example: 7654321
+          type: string
+          example: 7654321-1A
         correo:
           type: string
           format: email
           example: maria.lopez@uagrm.edu.bo
         celular:
-          type: integer
-          format: int32
+          type: string
           nullable: true
-          example: 70012345
+          example: '70012345'
         fechaNac:
           type: string
           format: date
@@ -743,9 +964,8 @@ components:
           format: int32
           example: 219012345
         ci:
-          type: integer
-          format: int32
-          example: 7654321
+          type: string
+          example: 7654321-1A
         correo:
           type: string
           format: email
@@ -940,6 +1160,36 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/ResultadoImportacion'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaDominio:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Dominio'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaListaDominios:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dominio'
         message:
           type: string
         status:
