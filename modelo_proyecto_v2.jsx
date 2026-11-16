@@ -57,7 +57,7 @@ const DECISIONS = [
   ]},
   { cat:"Stack y contratos (decisiones de implementación)", items:[
     { q:"Versión del stack", a:"Java 25 + Spring Boot 4.1.1 (Spring Security 7, Jackson 3, Hibernate 7, Gradle 9 multimodulo) en lugar de Java 17 / Boot 3. Frontend Angular 22 standalone, zoneless, signals, sin librería UI (CSS propio con la paleta del modelo), tests con Vitest." },
-    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.2.0." },
+    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.3.0." },
     { q:"Control de cambios de contrato", a:"script/contratos.sh (etapa 'Contratos' de Jenkins): Redocly lint + oasdiff breaking contra origin/main. Un breaking change falla el build salvo que se suba la versión MAYOR de info.version." },
     { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012." },
     { q:"Puertos de los microservicios", a:"auth-service :8081, catalog-service :8082, user-service :8083 (se intercambiaron user y catalog respecto al modelo original porque catálogos se implementó primero). Nginx/proxy enrutan por prefijo: /api/v1/auth → 8081; /api/v1/usuarios, /tipos-usuario, /padron → 8083; resto → 8082." },
@@ -89,7 +89,10 @@ const DECISIONS = [
     { q:"Estados del trabajo", a:"PENDIENTE → EN_REVISION → APROBADO | APROBADO_CON_OBSERVACIONES | RECHAZADO → EVALUADO" },
   ]},
   { cat:"Notificaciones", items:[
-    { q:"Canales de notificación", a:"En-app (campana/badge en navbar) + correo SMTP opcional habilitado por el estudiante desde su perfil." },
+    { q:"Canales de notificación", a:"En-app (campana/badge en navbar) + correo SMTP opcional: cada usuario lo activa en su perfil (usuario.notificar_correo, por defecto desactivado) y solo se envía si SMTP_GROUP.ACTIVO. Un fallo de correo nunca rompe la operación que lo originó." },
+    { q:"Campana y polling [S2]", a:"Tabla notificacion en user-service. La campana consulta GET /notificaciones/pendientes cada NOTIF_GROUP.POLLING_SEGUNDOS (30 s, lo devuelve el propio endpoint) y se pausa con la pestaña oculta. El contador vive en Redis notif:pendientes:{idUsuario} (TTL 1 día), así el polling no toca PostgreSQL; si Redis cae se cuenta en la BD." },
+    { q:"Retención y Quartz [S2]", a:"La tarea original 'limpieza de tokens JWT expirados' no hace falta (Redis expira las keys por TTL). Se reemplazó por un job Quartz diario que borra notificaciones leídas con más de NOTIF_GROUP.RETENCION_DIAS (90)." },
+    { q:"Eventos que notifican", a:"Sprint 2: BIENVENIDA (auto-registro y alta por admin), PASSWORD_RESTABLECIDA. Sprint 3+: cambios de estado del trabajo, plagio finalizado. El servicio de notificaciones vive en imp para que lo use work-service." },
     { q:"Configuración SMTP", a:"Configurable por administrador en la tabla de dominio, grupo SMTP_GROUP: HOST, PUERTO, CORREO (remitente), PASSWORD (secreto), SEGURIDAD (SSL | STARTTLS | NINGUNA), ACTIVO. Se prueba con POST /api/v1/config/smtp/prueba (user-service). La tabla config_smtp del modelo original se eliminó (V6)." },
   ]},
   { cat:"Detección de plagio", items:[
@@ -119,7 +122,7 @@ const DECISIONS = [
     { q:"Caché de catálogos [implementado S2]", a:"Cache-aside en catalog-service: catalog:cache:{entidad}:todas | catalog:cache:{entidad}:facultad:{id}, TTL 600 s. Un SET índice catalog:cache:{entidad}:indice permite invalidar sin KEYS/SCAN; la invalidación ocurre después del commit. Se cachean facultades, carreras, materias, semestres, fases y tipos de trabajo (no grupos ni listados con inactivos). Si Redis falla en la caché → PostgreSQL (sin 503)." },
     { q:"Estado del análisis de plagio", a:"SET plagio:status:{idTrabajo} 'EN_PROCESO' EX 600. Angular hace polling cada 5s contra Redis (no contra PostgreSQL). Cuando Copyleaks responde: SET plagio:status:{idTrabajo} 'COMPLETADO'. Evita N hits a BD durante el análisis." },
     { q:"Cola de uploads (buffer ante picos)", a:"En lugar de que N estudiantes golpeen MinIO directamente: LPUSH queue:uploads:{facultad} {payload}. work-service consume con BRPOP procesando de a N en paralelo. Buffer ante subidas simultáneas masivas al cierre de semestre." },
-    { q:"Namespaces de keys por microservicio", a:"auth:blacklist:{jti} · auth:revocado-desde:{idUsuario} · auth:rate:login:{ip} · auth:rate:register:{ip} (TTL = LOGIN_WAITING min) · config:dominio:{GRUPO} (600 s) · config:facultad:{idFacultad} (600 s) · auth:2fa:pending:{tokenTemporal} (300 s) · auth:2fa:intentos:{tokenTemporal} (300 s) · catalog:cache:* (600 s) · work:rate:upload:* · work:queue:uploads:* · plagio:status:* · notif:pending:*. Todas las keys se construyen solo en imp.redis.ClavesRedis y siempre con TTL." },
+    { q:"Namespaces de keys por microservicio", a:"auth:blacklist:{jti} · auth:revocado-desde:{idUsuario} · auth:rate:login:{ip} · auth:rate:register:{ip} (TTL = LOGIN_WAITING min) · config:dominio:{GRUPO} (600 s) · config:facultad:{idFacultad} (600 s) · notif:pendientes:{idUsuario} (1 día) · auth:2fa:pending:{tokenTemporal} (300 s) · auth:2fa:intentos:{tokenTemporal} (300 s) · catalog:cache:* (600 s) · work:rate:upload:* · work:queue:uploads:* · plagio:status:*. Todas las keys se construyen solo en imp.redis.ClavesRedis y siempre con TTL." },
     { q:"Dependencias Spring Boot", a:"spring-boot-starter-data-redis + spring-boot-starter-cache. Un contenedor Redis más en docker-compose y Kubernetes. Sin cambios arquitecturales a los microservicios existentes." },
   ]},
 ];
@@ -130,7 +133,7 @@ const MERMAID_ER = `erDiagram
     ESTUDIANTE_HABILITADO { int id PK; int registro UK; varchar ci UK; varchar correo; varchar passwordDefault; varchar nombres; varchar apellidos; int idCarrera FK; boolean habilitado; timestamp fechaImportacion }
     PERSONA { int idPersona PK; varchar nombre; varchar apellidos; varchar ci; varchar correo; varchar celular; date fechaNac; int registro; int idCarrera FK }
     TIPO_USUARIO { int idTipoUsuario PK; varchar nombre; varchar descripcion; int estado }
-    USUARIO { int idUsuario PK; varchar usuario; varchar password; boolean requiereCambioPassword; boolean twoFactorEnabled; varchar totpSecret; int idTipoUsuario FK; int idPersona FK; int estado }
+    USUARIO { int idUsuario PK; varchar usuario; varchar password; boolean requiereCambioPassword; boolean notificarCorreo; boolean twoFactorEnabled; varchar totpSecret; int idTipoUsuario FK; int idPersona FK; int estado }
     SEMESTRE { int idSemestre PK; int semestre; int anio; int idFacultad FK; int estado }
     MATERIA { int idMateria PK; varchar nombre; varchar sigla; int idFacultad FK; int estado }
     GRUPO { int idGrupo PK; varchar nombre; int idMateria FK; int idSemestre FK; int estado }
@@ -145,6 +148,7 @@ const MERMAID_ER = `erDiagram
     DETALLE_TRABAJO_HASHTAG { int idTrabajo FK; int idHashtag FK }
     RESULTADO_PLAGIO { int id PK; int idTrabajo FK; float porcentajeSimilitud; varchar fuenteComparacion; varchar detalle; timestamp fechaAnalisis }
     CONFIG_FACULTAD { int id PK; int idFacultad FK; int tamanoMaxArchivoMB; int umbralPlagioMedio; int umbralPlagioAlto; boolean comparacionInternet; boolean accesoExterno; int escalaCalifMax; int jwtExpiracionHoras }
+    NOTIFICACION { int idNotificacion PK; int idUsuario FK; varchar tipo; varchar titulo; varchar mensaje; varchar enlace; boolean leida; timestamp fechaCreacion; timestamp fechaLectura }
     DOMINIO { int domainId PK; varchar domainGroup; varchar domainName; varchar domainValue; varchar description; varchar lastUser; timestamp lastTime }
 
     FACULTAD ||--o{ CARRERA : tiene
@@ -173,7 +177,8 @@ const MERMAID_ER = `erDiagram
     FASE ||--o{ DOCUMENTO : clasifica
     TRABAJO ||--o{ DETALLE_TRABAJO_HASHTAG : etiqueta
     HASHTAG ||--o{ DETALLE_TRABAJO_HASHTAG : aparece
-    TRABAJO ||--o{ RESULTADO_PLAGIO : analiza`;
+    TRABAJO ||--o{ RESULTADO_PLAGIO : analiza
+    USUARIO ||--o{ NOTIFICACION : recibe`;
 
 const ENTITIES = [
   { name:"Facultad",              color:"#1B3A6B", attrs:[["idFacultad","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["estado","INT"]] },
@@ -181,7 +186,7 @@ const ENTITIES = [
   { name:"EstudianteHabilitado",  color:"#065F46", attrs:[["id","INT PK"],["registro","INT UNIQUE"],["ci","VARCHAR UNIQUE"],["correo","VARCHAR"],["passwordDefault","VARCHAR (BCrypt)"],["nombres","VARCHAR"],["apellidos","VARCHAR"],["idCarrera","INT FK"],["habilitado","BOOLEAN"],["fechaImportacion","TIMESTAMP"]] },
   { name:"Persona",               color:"#374151", attrs:[["idPersona","INT PK"],["nombre","VARCHAR"],["apellidos","VARCHAR"],["ci","VARCHAR UNIQUE"],["correo","VARCHAR"],["celular","VARCHAR"],["fechaNac","DATE"],["registro","INT"],["idCarrera","INT FK"]] },
   { name:"TipoUsuario",           color:"#374151", attrs:[["idTipoUsuario","INT PK"],["nombre","VARCHAR"],["descripcion","VARCHAR"],["estado","INT"]] },
-  { name:"Usuario",               color:"#374151", attrs:[["idUsuario","INT PK"],["usuario","VARCHAR"],["password","VARCHAR"],["requiereCambioPassword","BOOLEAN"],["twoFactorEnabled","BOOLEAN"],["totpSecret","VARCHAR"],["idTipoUsuario","INT FK"],["idPersona","INT FK"],["estado","INT"]] },
+  { name:"Usuario",               color:"#374151", attrs:[["idUsuario","INT PK"],["usuario","VARCHAR"],["password","VARCHAR"],["requiereCambioPassword","BOOLEAN"],["notificarCorreo","BOOLEAN"],["twoFactorEnabled","BOOLEAN"],["totpSecret","VARCHAR"],["idTipoUsuario","INT FK"],["idPersona","INT FK"],["estado","INT"]] },
   { name:"Semestre",              color:"#92400E", attrs:[["idSemestre","INT PK"],["semestre","INT"],["anio","INT"],["idFacultad","INT FK"],["estado","INT"]] },
   { name:"Materia",               color:"#92400E", attrs:[["idMateria","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["idFacultad","INT FK"],["estado","INT"]] },
   { name:"Grupo",                 color:"#92400E", attrs:[["idGrupo","INT PK"],["nombre","VARCHAR"],["idMateria","INT FK"],["idSemestre","INT FK"],["estado","INT"]] },
@@ -196,6 +201,7 @@ const ENTITIES = [
   { name:"DetalleTrabajoHashtag", color:"#374151", attrs:[["idTrabajo","INT FK"],["idHashtag","INT FK"]] },
   { name:"ResultadoPlagio",       color:"#B91C1C", attrs:[["id","INT PK"],["idTrabajo","INT FK"],["porcentajeSimilitud","FLOAT"],["fuenteComparacion","VARCHAR"],["detalle","TEXT"],["fechaAnalisis","TIMESTAMP"]] },
   { name:"ConfigFacultad",        color:"#0369A1", attrs:[["id","INT PK"],["idFacultad","INT FK"],["tamanoMaxArchivoMB","INT"],["umbralPlagioMedio","INT"],["umbralPlagioAlto","INT"],["comparacionInternet","BOOLEAN"],["accesoExterno","BOOLEAN"],["escalaCalifMax","INT"],["jwtExpiracionHoras","INT"]] },
+  { name:"Notificacion",          color:"#5B21B6", attrs:[["idNotificacion","INT PK"],["idUsuario","INT FK"],["tipo","VARCHAR"],["titulo","VARCHAR"],["mensaje","VARCHAR"],["enlace","VARCHAR"],["leida","BOOLEAN"],["fechaCreacion","TIMESTAMP"],["fechaLectura","TIMESTAMP"]] },
   { name:"Dominio",               color:"#0369A1", attrs:[["domainId","INT PK"],["domainGroup","VARCHAR"],["domainName","VARCHAR"],["domainValue","VARCHAR"],["description","VARCHAR"],["lastUser","VARCHAR"],["lastTime","TIMESTAMP"]] },
 ];
 
@@ -243,7 +249,7 @@ const API_GROUPS = [
     { m:"POST", p:"/api/v1/auth/2fa/confirm",      d:"Confirmar activación 2FA con un código" },
     { m:"POST", p:"/api/v1/auth/2fa/disable",      d:"Desactivar 2FA con un código" },
   ]},
-  { group:"Usuarios, Padrón y Dominio — user-service :8083 (user-api 1.2.0, solo ADMIN)", color:"#1B3A6B", endpoints:[
+  { group:"Usuarios, Padrón, Dominio y Notificaciones — user-service :8083 (user-api 1.3.0; ADMIN salvo notificaciones/perfil)", color:"#1B3A6B", endpoints:[
     { m:"GET",    p:"/api/v1/usuarios",                       d:"Listar paginado (q, rol, idCarrera, incluirInactivos, pagina, tamano)" },
     { m:"GET",    p:"/api/v1/usuarios/{id}",                  d:"Obtener usuario" },
     { m:"POST",   p:"/api/v1/usuarios",                       d:"Crear usuario con contraseña inicial (cambio obligatorio)" },
@@ -259,6 +265,12 @@ const API_GROUPS = [
     { m:"GET",    p:"/api/v1/dominios/{id}",                  d:"Obtener parámetro" },
     { m:"PUT",    p:"/api/v1/dominios/{id}",                  d:"Cambiar valor y descripción (se aplica al instante en todos los servicios)" },
     { m:"DELETE", p:"/api/v1/dominios/{id}",                  d:"Eliminar parámetro (409 si lo usa el sistema)" },
+    { m:"GET",    p:"/api/v1/notificaciones",                 d:"Mis notificaciones paginadas (cualquier rol)" },
+    { m:"GET",    p:"/api/v1/notificaciones/pendientes",      d:"Cantidad sin leer + pollingSegundos (campana, lee Redis)" },
+    { m:"PATCH",  p:"/api/v1/notificaciones/{id}/leida",      d:"Marcar leída (404 si es ajena)" },
+    { m:"POST",   p:"/api/v1/notificaciones/leidas",          d:"Marcar todas como leídas" },
+    { m:"GET",    p:"/api/v1/perfil/preferencias",            d:"Mis preferencias (notificarCorreo)" },
+    { m:"PUT",    p:"/api/v1/perfil/preferencias",            d:"Cambiar mis preferencias" },
   ]},
   { group:"Catálogos — catalog-service :8082 (catalog-api 1.2.0)", color:"#065F46", endpoints:[
     { m:"GET",    p:"/api/v1/facultades",                       d:"Listar (incluirInactivos) — caché Redis" },
@@ -412,9 +424,9 @@ const SPRINTS = [
       "✅ CI y celular como texto; estudiante siempre con carrera",
       "✅ ConfigFacultad: GET/PUT en catalog-service (defaults en FACULTAD_DEFAULT_GROUP, caché config:facultad:{id}) + /admin/configuracion",
       "✅ SMTP en dominio (SMTP_GROUP, contraseña cifrada AES-GCM) + 'Enviar correo de prueba' + pestaña Correo en /admin/configuracion",
-      "⏳ Notificaciones in-app: sistema de campana + badge con polling",
-      "⏳ Notificaciones por correo SMTP: integración Spring Mail (opcional por usuario)",
-      "⏳ Quartz job: limpieza de tokens JWT expirados (las keys de Redis ya expiran solas por TTL; revisar si sigue haciendo falta)",
+      "🚧 Notificaciones in-app: tabla notificacion + campana con polling (contador Redis notif:pendientes:{id}) + /notificaciones",
+      "🚧 Notificaciones por correo SMTP vía CorreoService (opcional por usuario en /perfil)",
+      "🚧 Quartz job: purga de notificaciones leídas antiguas (reemplaza 'limpieza de tokens JWT', innecesaria por el TTL de Redis)",
       "🚧 Pruebas unitarias JUnit 5 + Mockito + tests de contrato: servicios usuario y catálogo",
     ], cu:["CU-REG","CU-IMP","CU-CFG"]},
   { num:3, title:"Repositorio de Trabajos", duration:"3 semanas",
@@ -563,6 +575,7 @@ const ROUTES_TABLE = [
   { path:"/change-password",          comp:"ChangePasswordComponent",  guard:"AuthGuard",                        rol:"Todos" },
   { path:"/admin/usuarios",           comp:"UsuariosListComponent",    guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
   { path:"/admin/padron",             comp:"PadronComponent",          guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
+  { path:"/notificaciones",           comp:"NotificacionesComponent",  guard:"AuthGuard",                        rol:"Todos" },
   { path:"/admin/parametros",         comp:"ParametrosComponent",      guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
   { path:"/admin/catalogos/:entidad", comp:"Catálogos (facultades … tipos-trabajo)", guard:"AuthGuard+RoleGuard('ADMIN')", rol:"Admin" },
   { path:"/perfil/seguridad",         comp:"SeguridadComponent (2FA)", guard:"AuthGuard",                        rol:"Todos" },
