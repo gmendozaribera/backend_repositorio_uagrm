@@ -28,6 +28,8 @@ import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dto.common.PaginaResponse;
 import com.uagrm.repositorio.dto.dominio.DominioResponse;
+import com.uagrm.repositorio.dto.notificacion.NotificacionesPendientesResponse;
+import com.uagrm.repositorio.dto.perfil.Preferencias;
 import com.uagrm.repositorio.dto.padron.EstudianteHabilitadoResponse;
 import com.uagrm.repositorio.dto.usuario.UsuarioResponse;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
@@ -38,27 +40,34 @@ import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import com.uagrm.repositorio.imp.service.correo.CorreoService;
 import com.uagrm.repositorio.imp.service.dominio.DominioService;
+import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
 import com.uagrm.repositorio.imp.service.padron.PadronService;
+import com.uagrm.repositorio.imp.service.perfil.PerfilService;
 import com.uagrm.repositorio.imp.service.usuario.UsuarioService;
 import com.uagrm.repositorio.mockup.CatalogoMock;
 import com.uagrm.repositorio.mockup.DominioMock;
+import com.uagrm.repositorio.mockup.NotificacionMock;
 import com.uagrm.repositorio.mockup.PadronMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import com.uagrm.repositorio.user.config.SecurityConfig;
 import com.uagrm.repositorio.user.controller.ConfigSmtpController;
 import com.uagrm.repositorio.user.controller.DominioController;
+import com.uagrm.repositorio.user.controller.NotificacionController;
 import com.uagrm.repositorio.user.controller.PadronController;
+import com.uagrm.repositorio.user.controller.PerfilController;
 import com.uagrm.repositorio.user.controller.TipoUsuarioController;
 import com.uagrm.repositorio.user.controller.UsuarioController;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -69,11 +78,11 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 /**
  * Test de contrato: verifica que los requests y responses reales del user-service (serializacion Jackson,
- * seguridad solo ADMIN, ProblemDetail) cumplen spec/openapi/user-api.yaml. Cubre todas las operaciones.
+ * seguridad solo ADMIN salvo notificaciones y perfil, ProblemDetail) cumplen spec/openapi/user-api.yaml. Cubre todas las operaciones.
  * Los servicios estan mockeados: aqui se prueba la forma de la API, no la logica de negocio.
  */
 @WebMvcTest(controllers = {UsuarioController.class, TipoUsuarioController.class, PadronController.class,
-        DominioController.class, ConfigSmtpController.class})
+        DominioController.class, ConfigSmtpController.class, NotificacionController.class, PerfilController.class})
 @Import({SecurityConfig.class, SeguridadConfig.class, SeguridadErrorHandler.class, JwtService.class})
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
@@ -87,6 +96,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class UserContratoTest {
 
     private static final String CONTRATO = "openapi/user-api.yaml";
+    private static final int ID_ESTUDIANTE = 33;
 
     /** Valida request y response; rechaza propiedades que el contrato no declara. */
     private static final OpenApiInteractionValidator ESTRICTO =
@@ -140,6 +150,10 @@ class UserContratoTest {
     private CorreoService correoService;
     @MockitoBean
     private RevocacionTokenService revocacionTokenService;
+    @MockitoBean
+    private NotificacionService notificacionService;
+    @MockitoBean
+    private PerfilService perfilService;
 
     // ---------- Usuarios ----------
 
@@ -464,6 +478,105 @@ class UserContratoTest {
         llamar(get("/api/v1/dominios"), docente(), null).andExpect(status().isForbidden()).andExpect(cumpleContrato());
     }
 
+    // ---------- Notificaciones (cualquier rol, siempre las del token) ----------
+
+    @Test
+    void estudianteListaSusNotificacionesPeroNoLosUsuarios() throws Exception {
+        when(notificacionService.listar(any(), anyBoolean(), anyInt(), anyInt())).thenReturn(new PaginaResponse<>(
+                List.of(NotificacionMock.response(2, false), NotificacionMock.response(1, true)), 0, 20, 2, 1));
+
+        llamar(get("/api/v1/notificaciones"), estudiante(), null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.contenido[0].fechaLectura").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.contenido[1].enlace").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(cumpleContrato());
+        llamar(get("/api/v1/notificaciones").param("soloNoLeidas", "true").param("pagina", "1").param("tamano", "5"),
+                estudiante(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/usuarios"), estudiante(), null)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+
+        // El usuario lo pone el token (sub), nunca un parametro
+        ArgumentCaptor<Jwt> jwt = ArgumentCaptor.forClass(Jwt.class);
+        verify(notificacionService).listar(jwt.capture(), eq(true), eq(1), eq(5));
+        assertThat(jwt.getValue().getSubject()).isEqualTo(String.valueOf(ID_ESTUDIANTE));
+        verify(notificacionService).listar(any(), eq(false), eq(0), eq(20));
+    }
+
+    @Test
+    void paginacionDeNotificacionesFueraDeRangoDevuelve400() throws Exception {
+        llamar(get("/api/v1/notificaciones").param("tamano", "101"), estudiante(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void docenteYAdminConsultanSusPendientes() throws Exception {
+        when(notificacionService.pendientes(any())).thenReturn(new NotificacionesPendientesResponse(3, 30));
+
+        llamar(get("/api/v1/notificaciones/pendientes"), docente(), null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.cantidad").value(3))
+                .andExpect(jsonPath("$.data.pollingSegundos").value(30))
+                .andExpect(cumpleContrato());
+        llamar(get("/api/v1/notificaciones/pendientes"), admin(), null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void marcarUnaLeidaYUnaAjenaDevuelve404() throws Exception {
+        when(notificacionService.marcarLeida(any(), eq(2))).thenReturn(NotificacionMock.response(2, true));
+        when(notificacionService.marcarLeida(any(), eq(9)))
+                .thenThrow(NegocioException.noEncontrado("No existe la notificacion 9."));
+
+        llamar(patch("/api/v1/notificaciones/2/leida"), estudiante(), null)
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.leida").value(true))
+                .andExpect(cumpleContrato());
+        llamar(patch("/api/v1/notificaciones/9/leida"), estudiante(), null)
+                .andExpect(status().isNotFound()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void marcarTodasLeidas() throws Exception {
+        llamar(post("/api/v1/notificaciones/leidas"), estudiante(), null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        verify(notificacionService).marcarTodasLeidas(any());
+    }
+
+    @Test
+    void conPasswordPendienteTampocoVeSusNotificaciones() throws Exception {
+        Usuario pendiente = UsuarioMock.usuario(ID_ESTUDIANTE, "219012345", TipoUsuario.ESTUDIANTE);
+        pendiente.setRequiereCambioPassword(true);
+        llamar(get("/api/v1/notificaciones/pendientes"), token(pendiente), null)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/perfil/preferencias"), token(pendiente), null)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void notificacionesSinTokenDevuelve401() throws Exception {
+        llamar(get("/api/v1/notificaciones"), null, null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    // ---------- Perfil ----------
+
+    @Test
+    void preferenciasDelUsuarioAutenticado() throws Exception {
+        when(perfilService.obtenerPreferencias(any())).thenReturn(new Preferencias(false));
+        when(perfilService.actualizarPreferencias(any(), any())).thenReturn(new Preferencias(true));
+
+        llamar(get("/api/v1/perfil/preferencias"), estudiante(), null)
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.notificarCorreo").value(false))
+                .andExpect(cumpleContrato());
+        llamar(put("/api/v1/perfil/preferencias"), docente(), "{\"notificarCorreo\":true}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.notificarCorreo").value(true))
+                .andExpect(cumpleContrato());
+        verify(perfilService).actualizarPreferencias(any(), eq(new Preferencias(true)));
+    }
+
+    @Test
+    void preferenciasSinValorDevuelve400() throws Exception {
+        llamar(put("/api/v1/perfil/preferencias"), estudiante(), "{}")
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
     // ---------- Seguridad ----------
 
     @Test
@@ -534,7 +647,7 @@ class UserContratoTest {
     }
 
     private String estudiante() {
-        return token(UsuarioMock.estudiante());
+        return token(UsuarioMock.usuario(ID_ESTUDIANTE, "219012345", TipoUsuario.ESTUDIANTE));
     }
 
     /** Access token real (firmado con el JwtService real) para pasar por el resource server real. */

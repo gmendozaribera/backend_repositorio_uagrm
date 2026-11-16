@@ -30,6 +30,8 @@ public final class ConstantesDominio {
     public static final String GRUPO_FACULTAD_DEFAULT = "FACULTAD_DEFAULT_GROUP";
     /** Servidor de correo saliente (antes tabla config_smtp; desde V6 vive aqui). */
     public static final String GRUPO_SMTP = "SMTP_GROUP";
+    /** Notificaciones in-app (campana del frontend). */
+    public static final String GRUPO_NOTIF = "NOTIF_GROUP";
 
     // ---------- Nombres: AUTH_GROUP ----------
 
@@ -62,6 +64,13 @@ public final class ConstantesDominio {
     public static final String SEGURIDAD_SSL = "SSL";
     public static final String SEGURIDAD_STARTTLS = "STARTTLS";
     public static final String SEGURIDAD_NINGUNA = "NINGUNA";
+
+    // ---------- Nombres: NOTIF_GROUP ----------
+
+    /** Segundos recomendados al frontend entre dos consultas de /notificaciones/pendientes. */
+    public static final String POLLING_SEGUNDOS = "POLLING_SEGUNDOS";
+    /** Dias que se conservan las notificaciones leidas antes de que el job diario las borre. */
+    public static final String RETENCION_DIAS = "RETENCION_DIAS";
 
     /**
      * Largo maximo del texto plano de un secreto: cifrado ocupa ~4/3 * (largo + 28) + 3 caracteres y
@@ -141,7 +150,10 @@ public final class ConstantesDominio {
         SMTP_PASSWORD(texto(GRUPO_SMTP, PASSWORD, Tipo.TEXTO, MAXIMO_BYTES_SECRETO, "", true, true)),
         SMTP_SEGURIDAD(enumerado(GRUPO_SMTP, SEGURIDAD, SEGURIDAD_STARTTLS,
                 SEGURIDAD_SSL, SEGURIDAD_STARTTLS, SEGURIDAD_NINGUNA)),
-        SMTP_ACTIVO(booleano(GRUPO_SMTP, ACTIVO, false));
+        SMTP_ACTIVO(booleano(GRUPO_SMTP, ACTIVO, false)),
+
+        NOTIF_POLLING_SEGUNDOS(entero(GRUPO_NOTIF, POLLING_SEGUNDOS, 5, 3600, 30)),
+        NOTIF_RETENCION_DIAS(entero(GRUPO_NOTIF, RETENCION_DIAS, 1, 3650, 90));
 
         private final Definicion def;
 

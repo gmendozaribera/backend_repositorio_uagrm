@@ -9,8 +9,18 @@ public final class ClavesRedis {
     private static final String CATALOGO = "catalog:cache:";
     private static final String DOMINIO = "config:dominio:";
     private static final String CONFIG_FACULTAD = "config:facultad:";
+    private static final String NOTIF_PENDIENTES = "notif:pendientes:";
 
     private ClavesRedis() {
+    }
+
+    /**
+     * notif:pendientes:{idUsuario} → contador (texto) de notificaciones NO leidas del usuario.
+     * TTL: app.notificaciones.cache.ttl (1 dia), renovado en cada escritura. Si no existe se recalcula con un
+     * COUNT en PostgreSQL al leerlo; crear una notificacion hace INCR solo si ya existe; marcar leida(s) la borra.
+     */
+    public static String notificacionesPendientes(Integer idUsuario) {
+        return NOTIF_PENDIENTES + idUsuario;
     }
 
     /**

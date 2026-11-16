@@ -65,4 +65,9 @@ public class Usuario {
     @NotNull
     @Column(nullable = false)
     private Integer estado = Estado.ACTIVO;
+
+    /** Preferencia del propio usuario: recibir tambien por correo sus notificaciones (si SMTP_GROUP.ACTIVO). */
+    @NotNull
+    @Column(nullable = false)
+    private Boolean notificarCorreo = Boolean.FALSE;
 }

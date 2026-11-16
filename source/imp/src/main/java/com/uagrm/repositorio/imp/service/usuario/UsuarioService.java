@@ -4,6 +4,7 @@ import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.Carrera;
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.Persona;
+import com.uagrm.repositorio.dao.entity.TipoNotificacion;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dao.repository.CarreraRepository;
@@ -21,6 +22,8 @@ import com.uagrm.repositorio.dto.usuario.TipoUsuarioResponse;
 import com.uagrm.repositorio.dto.usuario.UsuarioResponse;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
+import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
+import com.uagrm.repositorio.imp.service.notificacion.TextosNotificacion;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -54,6 +57,7 @@ public class UsuarioService {
     private final PasswordEncoder passwordEncoder;
     private final RevocacionTokenService revocacionTokenService;
     private final UsuarioMapper mapper;
+    private final NotificacionService notificacionService;
 
     @Transactional(readOnly = true)
     public PaginaResponse<UsuarioResponse> listar(String q, String rol, Integer idCarrera, boolean incluirInactivos,
@@ -97,7 +101,11 @@ public class UsuarioService {
         usuario.setTipoUsuario(rol);
         usuario.setPersona(persona);
         usuario.setEstado(Estado.ACTIVO);
-        return mapper.toResponse(usuarioRepository.save(usuario));
+        Usuario guardado = usuarioRepository.save(usuario);
+        notificacionService.notificar(guardado.getIdUsuario(), TipoNotificacion.BIENVENIDA,
+                TextosNotificacion.TITULO_BIENVENIDA, TextosNotificacion.MENSAJE_BIENVENIDA_ADMIN,
+                TextosNotificacion.ENLACE_SEGURIDAD);
+        return mapper.toResponse(guardado);
     }
 
     /**
@@ -158,13 +166,19 @@ public class UsuarioService {
         return mapper.toResponse(usuario);
     }
 
-    /** Contrasena temporal: obliga a cambiarla en el proximo login y cierra las sesiones abiertas. */
+    /**
+     * Contrasena temporal: obliga a cambiarla en el proximo login, cierra las sesiones abiertas y avisa al usuario
+     * (PASSWORD_RESTABLECIDA; el aviso nunca incluye la contrasena).
+     */
     @Transactional
     public void restablecerPassword(Integer id, RestablecerPasswordRequest request) {
         Usuario usuario = buscar(id);
         usuario.setPassword(passwordEncoder.encode(request.passwordNueva()));
         usuario.setRequiereCambioPassword(Boolean.TRUE);
         cerrarSesiones(usuario);
+        notificacionService.notificar(usuario.getIdUsuario(), TipoNotificacion.PASSWORD_RESTABLECIDA,
+                TextosNotificacion.TITULO_PASSWORD_RESTABLECIDA, TextosNotificacion.MENSAJE_PASSWORD_RESTABLECIDA,
+                TextosNotificacion.ENLACE_SEGURIDAD);
     }
 
     @Transactional(readOnly = true)

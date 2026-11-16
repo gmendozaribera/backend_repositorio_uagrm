@@ -40,6 +40,11 @@ spring:
     problemdetails:
       enabled: true
 
+  # Scheduler de la purga diaria de notificaciones: en memoria (sin tablas QRTZ_*). Con varias replicas cada una
+  # corre su copia del job, que es idempotente.
+  quartz:
+    job-store-type: memory
+
 app:
   # Mismos valores que auth-service: este servicio valida los tokens que emite auth-service
   # (misma clave HS256 y mismo emisor) y cierra sesiones con la misma revocacion de Redis.
@@ -62,6 +67,13 @@ app:
     # Obligatoria: sin ella el servicio no arranca. Nunca en el repo (Secret de Kubernetes). Si se cambia, los
     # secretos ya guardados dejan de poder descifrarse y hay que volver a cargarlos.
     cifrado-key: ${DOMINIO_CIFRADO_KEY}
+
+  notificaciones:
+    cache:
+      ttl: ${NOTIF_CACHE_TTL:1d}          # contador notif:pendientes:{idUsuario}; se renueva al escribir
+    purga:
+      cron: ${NOTIF_PURGA_CRON:0 0 3 * * ?}   # Quartz: todos los dias a las 03:00
+      zona: ${NOTIF_PURGA_ZONA:America/La_Paz}
 
 management:
   endpoints:

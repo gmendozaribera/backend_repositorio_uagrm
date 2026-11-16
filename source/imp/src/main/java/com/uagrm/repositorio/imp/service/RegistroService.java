@@ -4,6 +4,7 @@ import com.uagrm.repositorio.dao.entity.CarnetIdentidad;
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.EstudianteHabilitado;
 import com.uagrm.repositorio.dao.entity.Persona;
+import com.uagrm.repositorio.dao.entity.TipoNotificacion;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dao.repository.EstudianteHabilitadoRepository;
@@ -14,6 +15,8 @@ import com.uagrm.repositorio.dto.auth.RegistroRequest;
 import com.uagrm.repositorio.dto.auth.RegistroResponse;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
+import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
+import com.uagrm.repositorio.imp.service.notificacion.TextosNotificacion;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -23,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Auto-registro de estudiantes (CU-REG). Solo quien figura habilitado en el padron puede crear su cuenta:
  * usuario = numero de registro y contrasena = la password_default entregada por su facultad, que el padron ya
  * guarda como hash BCrypt y se copia tal cual (no se vuelve a cifrar). El primer login obliga a cambiarla.
+ * La cuenta nueva recibe la notificacion BIENVENIDA.
  */
 @Service
 @RequiredArgsConstructor
@@ -37,6 +41,7 @@ public class RegistroService {
     private final UsuarioRepository usuarioRepository;
     private final TipoUsuarioRepository tipoUsuarioRepository;
     private final LimiteIntentosService limiteIntentos;
+    private final NotificacionService notificacionService;
 
     /**
      * Limite de intentos por IP: si la IP ya agoto sus intentos responde 429; cada 404 (no esta en el padron) o
@@ -93,6 +98,10 @@ public class RegistroService {
         usuario.setEstado(Estado.ACTIVO);
         usuarioRepository.save(usuario);
 
+        // Misma transaccion: si algo falla despues, la cuenta y su bienvenida se revierten juntas
+        notificacionService.notificar(usuario.getIdUsuario(), TipoNotificacion.BIENVENIDA,
+                TextosNotificacion.TITULO_BIENVENIDA, TextosNotificacion.MENSAJE_BIENVENIDA_REGISTRO,
+                TextosNotificacion.ENLACE_SEGURIDAD);
         return new RegistroResponse(login);
     }
 }

@@ -17,8 +17,10 @@ import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
  * user-service no emite tokens: valida los access tokens de auth-service (misma firma HS256, mismo emisor)
- * y consulta la blacklist de Redis (fail-closed: 503 si Redis cae). Toda la API es solo ADMIN; quien aun
- * tiene la contrasena pendiente de cambio solo tiene la autoridad PASSWORD_CHANGE_REQUIRED y recibe 403.
+ * y consulta la blacklist de Redis (fail-closed: 503 si Redis cae). La API es solo ADMIN, salvo
+ * /api/v1/notificaciones/** y /api/v1/perfil/**, que puede usar cualquier rol porque solo operan sobre los datos
+ * del propio usuario del token (nunca reciben un id de usuario). Quien aun tiene la contrasena pendiente de
+ * cambio solo tiene la autoridad PASSWORD_CHANGE_REQUIRED (ningun rol) y recibe 403 en todo.
  */
 @Configuration
 public class SecurityConfig {
@@ -37,6 +39,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/error").permitAll()
+                        // Orden importa: la primera regla que coincide gana
+                        .requestMatchers("/api/v1/notificaciones/**", "/api/v1/perfil/**")
+                        .hasAnyRole(TipoUsuario.ADMIN, TipoUsuario.DOCENTE, TipoUsuario.ESTUDIANTE)
                         .requestMatchers("/api/v1/**").hasRole(TipoUsuario.ADMIN)
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth

@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.uagrm.repositorio.dao.entity.EstudianteHabilitado;
+import com.uagrm.repositorio.dao.entity.TipoNotificacion;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dao.repository.EstudianteHabilitadoRepository;
@@ -33,6 +34,8 @@ import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.TotpService;
+import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
+import com.uagrm.repositorio.imp.service.notificacion.TextosNotificacion;
 import com.uagrm.repositorio.mockup.CatalogoMock;
 import com.uagrm.repositorio.mockup.PadronMock;
 import java.time.Duration;
@@ -58,6 +61,7 @@ class RegistroServiceTest {
     private final UsuarioRepository usuarioRepository = mock(UsuarioRepository.class);
     private final TipoUsuarioRepository tipoUsuarioRepository = mock(TipoUsuarioRepository.class);
     private final LimiteIntentosService limiteIntentos = mock(LimiteIntentosService.class);
+    private final NotificacionService notificacionService = mock(NotificacionService.class);
 
     private RegistroService registroService;
     private EstudianteHabilitado padron;
@@ -66,7 +70,7 @@ class RegistroServiceTest {
     @BeforeEach
     void setUp() {
         registroService = new RegistroService(padronRepository, personaRepository, usuarioRepository,
-                tipoUsuarioRepository, limiteIntentos);
+                tipoUsuarioRepository, limiteIntentos, notificacionService);
         padron = PadronMock.estudianteHabilitado(CatalogoMock.carrera(CatalogoMock.facultad()), HASH);
         when(padronRepository.findByCiAndRegistro(PadronMock.CI, PadronMock.REGISTRO)).thenReturn(Optional.of(padron));
         TipoUsuario estudiante = new TipoUsuario();
@@ -176,6 +180,25 @@ class RegistroServiceTest {
                     assertThat(ex.getMessage()).isEqualTo(detalle);
                 });
         verify(usuarioRepository, never()).save(any());
+        verify(notificacionService, never()).notificar(any(), any(), any(), any(), any());
+    }
+
+    // ---------- notificacion de bienvenida ----------
+
+    @Test
+    void laCuentaNuevaRecibeLaNotificacionDeBienvenida() {
+        registroService.registrar(request, IP);
+
+        verify(notificacionService).notificar(99, TipoNotificacion.BIENVENIDA, TextosNotificacion.TITULO_BIENVENIDA,
+                TextosNotificacion.MENSAJE_BIENVENIDA_REGISTRO, TextosNotificacion.ENLACE_SEGURIDAD);
+    }
+
+    @Test
+    void sinCuentaNoHayBienvenida() {
+        when(padronRepository.findByCiAndRegistro(PadronMock.CI, PadronMock.REGISTRO)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> registroService.registrar(request, IP)).isInstanceOf(NegocioException.class);
+        verify(notificacionService, never()).notificar(any(), any(), any(), any(), any());
     }
 
     // ---------- CI como texto y limite de intentos ----------

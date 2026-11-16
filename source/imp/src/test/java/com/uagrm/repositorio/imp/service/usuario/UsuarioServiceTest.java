@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.uagrm.repositorio.dao.entity.Carrera;
 import com.uagrm.repositorio.dao.entity.Estado;
+import com.uagrm.repositorio.dao.entity.TipoNotificacion;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dao.repository.CarreraRepository;
@@ -25,6 +26,8 @@ import com.uagrm.repositorio.dto.usuario.RestablecerPasswordRequest;
 import com.uagrm.repositorio.dto.usuario.UsuarioResponse;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
+import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
+import com.uagrm.repositorio.imp.service.notificacion.TextosNotificacion;
 import com.uagrm.repositorio.mockup.CatalogoMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import java.util.Optional;
@@ -46,6 +49,7 @@ class UsuarioServiceTest {
     private final CarreraRepository carreraRepository = mock(CarreraRepository.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final RevocacionTokenService revocacionTokenService = mock(RevocacionTokenService.class);
+    private final NotificacionService notificacionService = mock(NotificacionService.class);
 
     private UsuarioService service;
     private Usuario admin;
@@ -55,7 +59,7 @@ class UsuarioServiceTest {
     @BeforeEach
     void setUp() {
         service = new UsuarioService(usuarioRepository, personaRepository, tipoUsuarioRepository, carreraRepository,
-                passwordEncoder, revocacionTokenService, new UsuarioMapperImpl());
+                passwordEncoder, revocacionTokenService, new UsuarioMapperImpl(), notificacionService);
         admin = UsuarioMock.usuario(ID_ADMIN, "admin", TipoUsuario.ADMIN);
         docente = UsuarioMock.usuario(ID_DOCENTE, "doc.maria", TipoUsuario.DOCENTE);
         inf = CatalogoMock.carrera(CatalogoMock.facultad());
@@ -125,6 +129,21 @@ class UsuarioServiceTest {
         esperar(HttpStatus.CONFLICT,
                 () -> service.crear(crear("est.ana", TipoUsuario.ESTUDIANTE, 219000111, inf.getIdCarrera())));
         verify(usuarioRepository, never()).save(any());
+        verify(notificacionService, never()).notificar(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void elUsuarioCreadoPorElAdminRecibeLaBienvenida() {
+        when(usuarioRepository.save(any())).thenAnswer(inv -> {
+            Usuario u = inv.getArgument(0);
+            u.setIdUsuario(42);
+            return u;
+        });
+
+        service.crear(crear("doc.ana", TipoUsuario.DOCENTE, null, null));
+
+        verify(notificacionService).notificar(42, TipoNotificacion.BIENVENIDA, TextosNotificacion.TITULO_BIENVENIDA,
+                TextosNotificacion.MENSAJE_BIENVENIDA_ADMIN, TextosNotificacion.ENLACE_SEGURIDAD);
     }
 
     @Test
@@ -189,6 +208,19 @@ class UsuarioServiceTest {
         assertThat(docente.getRequiereCambioPassword()).isTrue();
         verify(passwordEncoder).encode("Temporal2026");
         verify(revocacionTokenService).revocarTodosDesde(eq(ID_DOCENTE), any());
+        verify(notificacionService).notificar(ID_DOCENTE, TipoNotificacion.PASSWORD_RESTABLECIDA,
+                TextosNotificacion.TITULO_PASSWORD_RESTABLECIDA, TextosNotificacion.MENSAJE_PASSWORD_RESTABLECIDA,
+                TextosNotificacion.ENLACE_SEGURIDAD);
+    }
+
+    @Test
+    void siNoSePuedenCerrarLasSesionesNoSeNotificaElReset() {
+        org.mockito.Mockito.doThrow(new NegocioException(HttpStatus.SERVICE_UNAVAILABLE, "Servicio no disponible", "x"))
+                .when(revocacionTokenService).revocarTodosDesde(eq(ID_DOCENTE), any());
+
+        esperar(HttpStatus.SERVICE_UNAVAILABLE,
+                () -> service.restablecerPassword(ID_DOCENTE, new RestablecerPasswordRequest("Temporal2026")));
+        verify(notificacionService, never()).notificar(any(), any(), any(), any(), any());
     }
 
     // ---------- CI como texto ----------

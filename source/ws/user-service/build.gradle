@@ -7,6 +7,8 @@ description = 'user-service :8083 — usuarios, roles y padron estudiantil (impo
 dependencies {
     implementation project(':imp')
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Job diario de purga de notificaciones leidas (RAMJobStore: sin tablas QRTZ_*, el job es idempotente)
+    implementation 'org.springframework.boot:spring-boot-starter-quartz'
     // Sin Flyway a proposito: las migraciones (source/dao) las aplica solo auth-service.
     // Este servicio arranca con ddl-auto=validate sobre el esquema ya migrado.
     runtimeOnly 'org.postgresql:postgresql'
