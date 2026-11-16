@@ -46,9 +46,16 @@ const DECISIONS = [
     { q:"Primer login / contraseña temporal [implementado S1]", a:"Columna usuario.requiere_cambio_password (no estaba en el modelo original). Con pwd_change=true el token solo permite /password/change y /logout (403 en lo demás). Política: 8–72 caracteres con mayúscula, minúscula y número. Admin inicial creado al arrancar (ADMIN_INICIAL_PASSWORD) y obligado a cambiarla." },
     { q:"Redis caído en autenticación [implementado S1]", a:"Fail-closed: si Redis no responde, toda petición autenticada devuelve 503 (no se puede verificar si el token fue revocado). Aplica también a los GET de catálogos (decisión 2026-11-16)." },
   ]},
+  { cat:"Parámetros configurables — tabla de dominio", items:[
+    { q:"Dónde viven los parámetros", a:"Todo parámetro configurable del sistema se registra en la tabla dominio (domain_id, domain_group, domain_name, domain_value, description, last_user, last_time; único por grupo + nombre), sembrado con una migración Flyway. La infraestructura (URLs, credenciales, secretos, puertos) sigue en variables de entorno." },
+    { q:"Constantes centralizadas", a:"Grupos y nombres se declaran SOLO en la clase ConstantesDominio (imp), con su tipo, rango válido y valor por defecto de respaldo. Ningún otro código usa esos strings sueltos, así 'buscar usos' muestra qué clases dependen de cada parámetro." },
+    { q:"Lectura con caché", a:"Hash Redis config:dominio:{GRUPO} (campo = domain_name), TTL 600 s, invalidado después del commit en toda escritura: un cambio se aplica en todos los servicios al instante. Si Redis falla se lee PostgreSQL; si el parámetro no existe se usa el valor por defecto del código." },
+    { q:"Administración", a:"CRUD /api/v1/dominios en user-service (solo ADMIN). Grupo y nombre son inmutables; los parámetros que usa el sistema no se pueden eliminar (409) y su valor se valida por tipo (400). last_user = login del administrador que hizo el cambio." },
+    { q:"Parámetros actuales", a:"AUTH_GROUP.LOGIN_INTENTOS = 10 (intentos fallidos por IP) · AUTH_GROUP.LOGIN_WAITING = 15 (minutos de bloqueo)." },
+  ]},
   { cat:"Stack y contratos (decisiones de implementación)", items:[
     { q:"Versión del stack", a:"Java 25 + Spring Boot 4.1.1 (Spring Security 7, Jackson 3, Hibernate 7, Gradle 9 multimodulo) en lugar de Java 17 / Boot 3. Frontend Angular 22 standalone, zoneless, signals, sin librería UI (CSS propio con la paleta del modelo), tests con Vitest." },
-    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.1.0, catalog-api 1.1.0, user-api 1.0.0." },
+    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.1.0, user-api 1.1.0." },
     { q:"Control de cambios de contrato", a:"script/contratos.sh (etapa 'Contratos' de Jenkins): Redocly lint + oasdiff breaking contra origin/main. Un breaking change falla el build salvo que se suba la versión MAYOR de info.version." },
     { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012." },
     { q:"Puertos de los microservicios", a:"auth-service :8081, catalog-service :8082, user-service :8083 (se intercambiaron user y catalog respecto al modelo original porque catálogos se implementó primero). Nginx/proxy enrutan por prefijo: /api/v1/auth → 8081; /api/v1/usuarios, /tipos-usuario, /padron → 8083; resto → 8082." },
@@ -59,6 +66,9 @@ const DECISIONS = [
     { q:"Auto-registro estudiantes", a:"POST /api/v1/auth/register {ci, registro} (público). Si coinciden con una fila habilitada de EstudianteHabilitado se crea Persona + Usuario ESTUDIANTE con usuario = número de registro y contraseña = password_default del padrón (cambio obligatorio en el primer login). No devuelve tokens. Sin match o inhabilitado → 404 'No encontrado en el padrón institucional'; ya tiene cuenta → 409. Conocer el CI y registro de otra persona no da acceso: hace falta la contraseña entregada por la facultad." },
     { q:"Importación padrón institucional", a:"CSV (coma o punto y coma, UTF-8), XLSX o XLS subido por el administrador (máx. 5 MB y 10 000 filas). Cabecera obligatoria con las columnas en cualquier orden. Upsert por registro (insertados / actualizados), errores por fila sin cortar la importación; las cuentas ya creadas no se tocan. La sigla_carrera se resuelve a id_carrera (FK). password_default se guarda cifrada con BCrypt, nunca en texto plano." },
     { q:"Recuperar contraseña", a:"Mientras no exista recuperación por correo (llega con SMTP), el administrador restablece la contraseña desde user-service (POST /usuarios/{id}/password/reset): contraseña temporal + cambio obligatorio + cierre de todas las sesiones." },
+    { q:"Límite de intentos en login y auto-registro", a:"Por IP, solo intentos FALLIDOS (los exitosos no cuentan porque muchos estudiantes comparten la IP del laboratorio). Al superar LOGIN_INTENTOS → 429 con Retry-After durante LOGIN_WAITING minutos. Keys auth:rate:login:{ip} y auth:rate:register:{ip}. Evita adivinar contraseñas y descubrir quién está en el padrón." },
+    { q:"CI y celular", a:"Texto (VARCHAR 20), no entero: el CI puede tener complemento (1234567-1A). Se guarda sin espacios y en mayúsculas." },
+    { q:"Estudiante y carrera", a:"Un estudiante siempre tiene carrera y registro: al editar se mantienen o se cambian, nunca quedan vacíos (en el PUT, omitidos o null = se conservan)." },
     { q:"Desactivar usuario", a:"Borrado lógico (estado 0) que además cierra todas sus sesiones (auth:revocado-desde). Cambiar el rol también las cierra. Un admin no puede desactivarse ni quitarse el rol ADMIN a sí mismo." },
     { q:"Estructura CSV padrón", a:"registro, ci, correo, password_default, nombres, apellidos, sigla_carrera. Ejemplo: 123456,7654321,est@uagrm.edu.bo,Uagrm2024.,Juan,Pérez,ITIN" },
   ]},
@@ -107,7 +117,7 @@ const DECISIONS = [
     { q:"Caché de catálogos [implementado S2]", a:"Cache-aside en catalog-service: catalog:cache:{entidad}:todas | catalog:cache:{entidad}:facultad:{id}, TTL 600 s. Un SET índice catalog:cache:{entidad}:indice permite invalidar sin KEYS/SCAN; la invalidación ocurre después del commit. Se cachean facultades, carreras, materias, semestres, fases y tipos de trabajo (no grupos ni listados con inactivos). Si Redis falla en la caché → PostgreSQL (sin 503)." },
     { q:"Estado del análisis de plagio", a:"SET plagio:status:{idTrabajo} 'EN_PROCESO' EX 600. Angular hace polling cada 5s contra Redis (no contra PostgreSQL). Cuando Copyleaks responde: SET plagio:status:{idTrabajo} 'COMPLETADO'. Evita N hits a BD durante el análisis." },
     { q:"Cola de uploads (buffer ante picos)", a:"En lugar de que N estudiantes golpeen MinIO directamente: LPUSH queue:uploads:{facultad} {payload}. work-service consume con BRPOP procesando de a N en paralelo. Buffer ante subidas simultáneas masivas al cierre de semestre." },
-    { q:"Namespaces de keys por microservicio", a:"auth:blacklist:{jti} · auth:revocado-desde:{idUsuario} · auth:2fa:pending:{tokenTemporal} (300 s) · auth:2fa:intentos:{tokenTemporal} (300 s) · catalog:cache:* (600 s) · work:rate:upload:* · work:queue:uploads:* · plagio:status:* · notif:pending:*. Todas las keys se construyen solo en imp.redis.ClavesRedis y siempre con TTL." },
+    { q:"Namespaces de keys por microservicio", a:"auth:blacklist:{jti} · auth:revocado-desde:{idUsuario} · auth:rate:login:{ip} · auth:rate:register:{ip} (TTL = LOGIN_WAITING min) · config:dominio:{GRUPO} (600 s) · auth:2fa:pending:{tokenTemporal} (300 s) · auth:2fa:intentos:{tokenTemporal} (300 s) · catalog:cache:* (600 s) · work:rate:upload:* · work:queue:uploads:* · plagio:status:* · notif:pending:*. Todas las keys se construyen solo en imp.redis.ClavesRedis y siempre con TTL." },
     { q:"Dependencias Spring Boot", a:"spring-boot-starter-data-redis + spring-boot-starter-cache. Un contenedor Redis más en docker-compose y Kubernetes. Sin cambios arquitecturales a los microservicios existentes." },
   ]},
 ];
@@ -115,8 +125,8 @@ const DECISIONS = [
 const MERMAID_ER = `erDiagram
     FACULTAD { int idFacultad PK; varchar nombre; varchar sigla; int estado }
     CARRERA { int idCarrera PK; varchar nombre; varchar sigla; int idFacultad FK; int estado }
-    ESTUDIANTE_HABILITADO { int id PK; int registro UK; int ci UK; varchar correo; varchar passwordDefault; varchar nombres; varchar apellidos; int idCarrera FK; boolean habilitado; timestamp fechaImportacion }
-    PERSONA { int idPersona PK; varchar nombre; varchar apellidos; int ci; varchar correo; int celular; date fechaNac; int registro; int idCarrera FK }
+    ESTUDIANTE_HABILITADO { int id PK; int registro UK; varchar ci UK; varchar correo; varchar passwordDefault; varchar nombres; varchar apellidos; int idCarrera FK; boolean habilitado; timestamp fechaImportacion }
+    PERSONA { int idPersona PK; varchar nombre; varchar apellidos; varchar ci; varchar correo; varchar celular; date fechaNac; int registro; int idCarrera FK }
     TIPO_USUARIO { int idTipoUsuario PK; varchar nombre; varchar descripcion; int estado }
     USUARIO { int idUsuario PK; varchar usuario; varchar password; boolean requiereCambioPassword; boolean twoFactorEnabled; varchar totpSecret; int idTipoUsuario FK; int idPersona FK; int estado }
     SEMESTRE { int idSemestre PK; int semestre; int anio; int idFacultad FK; int estado }
@@ -134,6 +144,7 @@ const MERMAID_ER = `erDiagram
     RESULTADO_PLAGIO { int id PK; int idTrabajo FK; float porcentajeSimilitud; varchar fuenteComparacion; varchar detalle; timestamp fechaAnalisis }
     CONFIG_FACULTAD { int id PK; int idFacultad FK; int tamanoMaxArchivoMB; int umbralPlagioMedio; int umbralPlagioAlto; boolean comparacionInternet; boolean accesoExterno; int escalaCalifMax; int jwtExpiracionHoras }
     CONFIG_SMTP { int id PK; varchar host; int puerto; varchar correo; varchar password; boolean ssl; boolean activo }
+    DOMINIO { int domainId PK; varchar domainGroup; varchar domainName; varchar domainValue; varchar description; varchar lastUser; timestamp lastTime }
 
     FACULTAD ||--o{ CARRERA : tiene
     FACULTAD ||--o{ SEMESTRE : define
@@ -166,8 +177,8 @@ const MERMAID_ER = `erDiagram
 const ENTITIES = [
   { name:"Facultad",              color:"#1B3A6B", attrs:[["idFacultad","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["estado","INT"]] },
   { name:"Carrera",               color:"#1B3A6B", attrs:[["idCarrera","INT PK"],["nombre","VARCHAR"],["sigla","VARCHAR"],["idFacultad","INT FK"],["estado","INT"]] },
-  { name:"EstudianteHabilitado",  color:"#065F46", attrs:[["id","INT PK"],["registro","INT UNIQUE"],["ci","INT UNIQUE"],["correo","VARCHAR"],["passwordDefault","VARCHAR (BCrypt)"],["nombres","VARCHAR"],["apellidos","VARCHAR"],["idCarrera","INT FK"],["habilitado","BOOLEAN"],["fechaImportacion","TIMESTAMP"]] },
-  { name:"Persona",               color:"#374151", attrs:[["idPersona","INT PK"],["nombre","VARCHAR"],["apellidos","VARCHAR"],["ci","INT"],["correo","VARCHAR"],["celular","INT"],["fechaNac","DATE"],["registro","INT"],["idCarrera","INT FK"]] },
+  { name:"EstudianteHabilitado",  color:"#065F46", attrs:[["id","INT PK"],["registro","INT UNIQUE"],["ci","VARCHAR UNIQUE"],["correo","VARCHAR"],["passwordDefault","VARCHAR (BCrypt)"],["nombres","VARCHAR"],["apellidos","VARCHAR"],["idCarrera","INT FK"],["habilitado","BOOLEAN"],["fechaImportacion","TIMESTAMP"]] },
+  { name:"Persona",               color:"#374151", attrs:[["idPersona","INT PK"],["nombre","VARCHAR"],["apellidos","VARCHAR"],["ci","VARCHAR UNIQUE"],["correo","VARCHAR"],["celular","VARCHAR"],["fechaNac","DATE"],["registro","INT"],["idCarrera","INT FK"]] },
   { name:"TipoUsuario",           color:"#374151", attrs:[["idTipoUsuario","INT PK"],["nombre","VARCHAR"],["descripcion","VARCHAR"],["estado","INT"]] },
   { name:"Usuario",               color:"#374151", attrs:[["idUsuario","INT PK"],["usuario","VARCHAR"],["password","VARCHAR"],["requiereCambioPassword","BOOLEAN"],["twoFactorEnabled","BOOLEAN"],["totpSecret","VARCHAR"],["idTipoUsuario","INT FK"],["idPersona","INT FK"],["estado","INT"]] },
   { name:"Semestre",              color:"#92400E", attrs:[["idSemestre","INT PK"],["semestre","INT"],["anio","INT"],["idFacultad","INT FK"],["estado","INT"]] },
@@ -184,6 +195,7 @@ const ENTITIES = [
   { name:"DetalleTrabajoHashtag", color:"#374151", attrs:[["idTrabajo","INT FK"],["idHashtag","INT FK"]] },
   { name:"ResultadoPlagio",       color:"#B91C1C", attrs:[["id","INT PK"],["idTrabajo","INT FK"],["porcentajeSimilitud","FLOAT"],["fuenteComparacion","VARCHAR"],["detalle","TEXT"],["fechaAnalisis","TIMESTAMP"]] },
   { name:"ConfigFacultad",        color:"#0369A1", attrs:[["id","INT PK"],["idFacultad","INT FK"],["tamanoMaxArchivoMB","INT"],["umbralPlagioMedio","INT"],["umbralPlagioAlto","INT"],["comparacionInternet","BOOLEAN"],["accesoExterno","BOOLEAN"],["escalaCalifMax","INT"],["jwtExpiracionHoras","INT"]] },
+  { name:"Dominio",               color:"#0369A1", attrs:[["domainId","INT PK"],["domainGroup","VARCHAR"],["domainName","VARCHAR"],["domainValue","VARCHAR"],["description","VARCHAR"],["lastUser","VARCHAR"],["lastTime","TIMESTAMP"]] },
   { name:"ConfigSMTP",            color:"#0369A1", attrs:[["id","INT PK"],["host","VARCHAR"],["puerto","INT"],["correo","VARCHAR"],["password","VARCHAR"],["ssl","BOOLEAN"],["activo","BOOLEAN"]] },
 ];
 
@@ -220,18 +232,18 @@ registro,ci,correo,password_default,nombres,apellidos,sigla_carrera
 # - El sistema valida cada fila y reporta errores sin interrumpir la importación`;
 
 const API_GROUPS = [
-  { group:"Auth — auth-service :8081 (auth-api 1.1.0)", color:"#5B21B6", endpoints:[
-    { m:"POST", p:"/api/v1/auth/login",           d:"Paso 1: JWT access + refresh, o tokenTemporal si tiene 2FA" },
+  { group:"Auth — auth-service :8081 (auth-api 1.2.0)", color:"#5B21B6", endpoints:[
+    { m:"POST", p:"/api/v1/auth/login",           d:"Paso 1: JWT access + refresh, o tokenTemporal si tiene 2FA (429 tras LOGIN_INTENTOS fallidos por IP)" },
     { m:"POST", p:"/api/v1/auth/2fa/verify",       d:"Paso 2: código TOTP → tokens (máx. 5 intentos)" },
     { m:"POST", p:"/api/v1/auth/refresh",          d:"Renovar sesión (rotación del refresh token)" },
     { m:"POST", p:"/api/v1/auth/logout",           d:"Cerrar sesión (blacklist del access y del refresh)" },
-    { m:"POST", p:"/api/v1/auth/register",         d:"Auto-registro estudiante {ci, registro} validado contra el padrón (sin tokens)" },
+    { m:"POST", p:"/api/v1/auth/register",         d:"Auto-registro estudiante {ci, registro} validado contra el padrón (sin tokens, 429 por intentos fallidos)" },
     { m:"POST", p:"/api/v1/auth/password/change",  d:"Cambiar contraseña (obligatorio en primer login) → tokens nuevos" },
     { m:"POST", p:"/api/v1/auth/2fa/enable",       d:"Iniciar activación 2FA: secreto + QR" },
     { m:"POST", p:"/api/v1/auth/2fa/confirm",      d:"Confirmar activación 2FA con un código" },
     { m:"POST", p:"/api/v1/auth/2fa/disable",      d:"Desactivar 2FA con un código" },
   ]},
-  { group:"Usuarios y Padrón — user-service :8083 (user-api 1.0.0, solo ADMIN)", color:"#1B3A6B", endpoints:[
+  { group:"Usuarios, Padrón y Dominio — user-service :8083 (user-api 1.1.0, solo ADMIN)", color:"#1B3A6B", endpoints:[
     { m:"GET",    p:"/api/v1/usuarios",                       d:"Listar paginado (q, rol, idCarrera, incluirInactivos, pagina, tamano)" },
     { m:"GET",    p:"/api/v1/usuarios/{id}",                  d:"Obtener usuario" },
     { m:"POST",   p:"/api/v1/usuarios",                       d:"Crear usuario con contraseña inicial (cambio obligatorio)" },
@@ -242,6 +254,11 @@ const API_GROUPS = [
     { m:"POST",   p:"/api/v1/padron/import",                  d:"Importar CSV/XLSX/XLS del padrón (multipart 'archivo') → resumen + errores por fila" },
     { m:"GET",    p:"/api/v1/padron",                         d:"Listar padrón paginado (q, idCarrera, registrado, habilitado)" },
     { m:"PATCH",  p:"/api/v1/padron/{id}",                    d:"Habilitar / inhabilitar estudiante para el auto-registro" },
+    { m:"GET",    p:"/api/v1/dominios",                       d:"Listar parámetros configurables (filtro domainGroup)" },
+    { m:"POST",   p:"/api/v1/dominios",                       d:"Crear parámetro (grupo + nombre únicos)" },
+    { m:"GET",    p:"/api/v1/dominios/{id}",                  d:"Obtener parámetro" },
+    { m:"PUT",    p:"/api/v1/dominios/{id}",                  d:"Cambiar valor y descripción (se aplica al instante en todos los servicios)" },
+    { m:"DELETE", p:"/api/v1/dominios/{id}",                  d:"Eliminar parámetro (409 si lo usa el sistema)" },
   ]},
   { group:"Catálogos — catalog-service :8082 (catalog-api 1.1.0)", color:"#065F46", endpoints:[
     { m:"GET",    p:"/api/v1/facultades",                       d:"Listar (incluirInactivos) — caché Redis" },
@@ -390,8 +407,10 @@ const SPRINTS = [
       "🚧 EstudianteHabilitado: tabla (V4) + importación CSV/XLSX/XLS (Apache POI) con errores por fila y password_default en BCrypt",
       "🚧 Flujo auto-registro: POST /auth/register valida CI + registro contra el padrón → crea la cuenta",
       "🚧 Angular: /registro, /admin/usuarios, /admin/padron y buscador de docentes en grupos",
-      "⏳ Rate limiting del auto-registro con Redis (contra enumeración del padrón) — pendiente de confirmar keys/TTL",
-      "⏳ ConfigFacultad: GET/PUT + pantalla de configuración en Admin Angular",
+      "🚧 Tabla de dominio (parámetros configurables) + ConstantesDominio + caché Redis config:dominio:{GRUPO} + CRUD /dominios + pantalla /admin/parametros",
+      "🚧 Rate limiting por IP de intentos fallidos en /auth/login y /auth/register (AUTH_GROUP.LOGIN_INTENTOS / LOGIN_WAITING)",
+      "🚧 CI y celular como texto; estudiante siempre con carrera",
+      "⏳ ConfigFacultad: GET/PUT + pantalla de configuración en Admin Angular (evaluar mover sus parámetros a la tabla de dominio)",
       "⏳ ConfigSMTP: GET/PUT + pantalla de configuración + botón 'Enviar correo de prueba'",
       "⏳ Notificaciones in-app: sistema de campana + badge con polling",
       "⏳ Notificaciones por correo SMTP: integración Spring Mail (opcional por usuario)",
@@ -438,7 +457,7 @@ const SPRINTS = [
       "Hardening Spring Security: CORS, CSRF, rate limiting, headers HTTP (HSTS, CSP)",
       "Manifiestos K8s: Deployments, Services, Ingress, ConfigMaps, Secrets por microservicio",
       "Jenkinsfile: build → test → docker build → push → kubectl apply",
-      "Swagger UI por microservicio (los contratos OpenAPI ya existen desde S1); cifrado de totpSecret; rate limiting de login por IP",
+      "Swagger UI por microservicio (los contratos OpenAPI ya existen desde S1); cifrado de totpSecret",
       "Seed de datos FICCT para demo: facultad, carreras, materias, usuarios de prueba",
       "Revisión final de criterios de aceptación de todos los CU",
     ], cu:[]},
@@ -544,6 +563,7 @@ const ROUTES_TABLE = [
   { path:"/change-password",          comp:"ChangePasswordComponent",  guard:"AuthGuard",                        rol:"Todos" },
   { path:"/admin/usuarios",           comp:"UsuariosListComponent",    guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
   { path:"/admin/padron",             comp:"PadronComponent",          guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
+  { path:"/admin/parametros",         comp:"ParametrosComponent",      guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
   { path:"/admin/catalogos/:entidad", comp:"Catálogos (facultades … tipos-trabajo)", guard:"AuthGuard+RoleGuard('ADMIN')", rol:"Admin" },
   { path:"/perfil/seguridad",         comp:"SeguridadComponent (2FA)", guard:"AuthGuard",                        rol:"Todos" },
   { path:"/admin/configuracion/:id",  comp:"ConfigFacultadComponent",  guard:"AuthGuard+RoleGuard('ADMIN')",      rol:"Admin" },
