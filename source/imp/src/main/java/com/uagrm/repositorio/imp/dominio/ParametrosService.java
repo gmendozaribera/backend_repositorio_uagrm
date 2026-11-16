@@ -4,6 +4,7 @@ import com.uagrm.repositorio.dao.entity.Dominio;
 import com.uagrm.repositorio.dao.repository.DominioRepository;
 import com.uagrm.repositorio.imp.config.DominioCacheProperties;
 import com.uagrm.repositorio.imp.dominio.ConstantesDominio.Parametro;
+import com.uagrm.repositorio.imp.dominio.ConstantesDominio.Tipo;
 import com.uagrm.repositorio.imp.redis.ClavesRedis;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +31,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  *   <li>Si Redis falla se DEGRADA a PostgreSQL (log warn), igual que la cache de catalogos.</li>
  *   <li>Si el parametro no existe o su valor es invalido se usa el valor por defecto de
  *       {@link ConstantesDominio} (log warn): un dato mal cargado no tumba el login.</li>
+ *   <li>Los secretos (p. ej. SMTP_GROUP.PASSWORD) estan cifrados en la BD y por lo tanto tambien en Redis;
+ *       solo {@link #secreto(Parametro)} los descifra, en memoria y para uso interno.</li>
  * </ul>
  */
 @Slf4j
@@ -47,28 +50,45 @@ public class ParametrosService {
     private final StringRedisTemplate redis;
     private final DominioRepository repository;
     private final DominioCacheProperties props;
+    private final CifradorDominio cifrador;
 
     /** Valor entero de un parametro del sistema (validado contra su rango; si no, el valor por defecto). */
     public int entero(Parametro parametro) {
-        Optional<String> valor = valor(parametro.grupo(), parametro.nombre());
-        if (valor.isEmpty()) {
-            log.warn("Falta el parametro {}.{} en la tabla dominio; se usa el valor por defecto {}",
-                    parametro.grupo(), parametro.nombre(), parametro.porDefecto());
-            return (int) parametro.porDefecto();
-        }
-        Optional<String> error = parametro.validar(valor.get());
-        if (error.isPresent()) {
-            log.warn("Valor invalido '{}' en {}.{} ({}); se usa el valor por defecto {}", valor.get(),
-                    parametro.grupo(), parametro.nombre(), error.get(), parametro.porDefecto());
-            return (int) parametro.porDefecto();
-        }
-        return Integer.parseInt(valor.get().trim());
+        exigirTipo(parametro, Tipo.ENTERO);
+        return Integer.parseInt(validado(parametro).trim());
     }
 
     /** Igual que {@link #entero(Parametro)} buscando el parametro por grupo y nombre (deben estar en ConstantesDominio). */
     public int entero(String grupo, String nombre) {
         return entero(ConstantesDominio.buscar(grupo, nombre).orElseThrow(() -> new IllegalArgumentException(
                 "El parametro " + grupo + "." + nombre + " no esta declarado en ConstantesDominio")));
+    }
+
+    /** Valor booleano ('true'/'false') de un parametro del sistema; si es invalido, el valor por defecto. */
+    public boolean booleano(Parametro parametro) {
+        exigirTipo(parametro, Tipo.BOOLEANO);
+        return Boolean.parseBoolean(validado(parametro));
+    }
+
+    /** Valor de texto (enum, email, host, texto) de un parametro NO secreto, validado; si no, el valor por defecto. */
+    public String texto(Parametro parametro) {
+        if (parametro.secreto()) {
+            throw new IllegalArgumentException("El parametro " + parametro + " es secreto: usar secreto()");
+        }
+        return validado(parametro);
+    }
+
+    /**
+     * Valor DESCIFRADO de un parametro secreto ("" si no esta configurado). Solo para uso interno (p. ej. la
+     * contrasena del servidor SMTP): nunca devolverlo en una respuesta ni loguearlo. Redis guarda solo el cifrado.
+     *
+     * @throws IllegalStateException si el servicio no tiene la llave o el valor no se puede descifrar
+     */
+    public String secreto(Parametro parametro) {
+        if (!parametro.secreto()) {
+            throw new IllegalArgumentException("El parametro " + parametro + " no es secreto: usar texto()");
+        }
+        return cifrador.descifrar(valor(parametro.grupo(), parametro.nombre()).orElse(""));
     }
 
     /** Valor crudo de cualquier parametro del grupo (vacio si no existe). */
@@ -91,6 +111,29 @@ public class ParametrosService {
     }
 
     // ---------- privados ----------
+
+    /** Valor crudo si cumple el tipo/rango; si falta o es invalido, el valor por defecto (log warn). */
+    private String validado(Parametro parametro) {
+        Optional<String> valor = valor(parametro.grupo(), parametro.nombre());
+        if (valor.isEmpty()) {
+            log.warn("Falta el parametro {}.{} en la tabla dominio; se usa el valor por defecto {}",
+                    parametro.grupo(), parametro.nombre(), parametro.porDefecto());
+            return parametro.porDefecto();
+        }
+        Optional<String> error = parametro.validar(valor.get());
+        if (error.isPresent()) {
+            log.warn("Valor invalido '{}' en {}.{} ({}); se usa el valor por defecto {}", valor.get(),
+                    parametro.grupo(), parametro.nombre(), error.get(), parametro.porDefecto());
+            return parametro.porDefecto();
+        }
+        return valor.get();
+    }
+
+    private static void exigirTipo(Parametro parametro, Tipo tipo) {
+        if (parametro.tipo() != tipo) {
+            throw new IllegalArgumentException("El parametro " + parametro + " es de tipo " + parametro.tipo());
+        }
+    }
 
     private Map<String, String> grupo(String grupo) {
         String clave = ClavesRedis.dominio(grupo);

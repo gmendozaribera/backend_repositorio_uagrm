@@ -15,7 +15,6 @@ import static org.mockito.Mockito.when;
 import com.uagrm.repositorio.dao.entity.EstudianteHabilitado;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
-import com.uagrm.repositorio.dao.repository.ConfigFacultadRepository;
 import com.uagrm.repositorio.dao.repository.EstudianteHabilitadoRepository;
 import com.uagrm.repositorio.dao.repository.PersonaRepository;
 import com.uagrm.repositorio.dao.repository.TipoUsuarioRepository;
@@ -25,7 +24,8 @@ import com.uagrm.repositorio.dto.auth.LoginResponse;
 import com.uagrm.repositorio.dto.auth.RegistroRequest;
 import com.uagrm.repositorio.dto.auth.RegistroResponse;
 import com.uagrm.repositorio.dto.mapper.UsuarioMapperImpl;
-import com.uagrm.repositorio.imp.config.SeguridadProperties;
+import com.uagrm.repositorio.imp.service.catalogo.ConfigFacultadService;
+import com.uagrm.repositorio.mockup.ConfigFacultadMock;
 import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.DosFactoresPendienteService;
@@ -108,15 +108,11 @@ class RegistroServiceTest {
         when(login.findByUsuario("219012345")).thenReturn(Optional.of(usuario));
         JwtService jwtService = mock(JwtService.class);
         when(jwtService.generar(any(), any())).thenReturn(new JwtService.ParTokens("a", "r", Duration.ofHours(1)));
-        ConfigFacultadRepository config = mock(ConfigFacultadRepository.class);
-        when(config.findByFacultadIdFacultad(anyInt())).thenReturn(Optional.empty());
+        ConfigFacultadService config = mock(ConfigFacultadService.class);
+        when(config.configDe(any())).thenReturn(ConfigFacultadMock.porDefecto(1));
         AuthService authService = new AuthService(login, config, BCRYPT, jwtService, mock(TotpService.class),
                 mock(RevocacionTokenService.class), mock(DosFactoresPendienteService.class),
-                mock(LimiteIntentosService.class), new UsuarioMapperImpl(),
-                new SeguridadProperties(
-                        new SeguridadProperties.Jwt("c2VjcmV0bw==", "test", Duration.ofHours(1), Duration.ofDays(7)),
-                        new SeguridadProperties.DosFactores("Test", Duration.ofMinutes(5), 5),
-                        List.of("http://localhost:4200")));
+                mock(LimiteIntentosService.class), new UsuarioMapperImpl());
 
         LoginResponse respuesta = authService.login(new LoginRequest("219012345", PASSWORD_DEFAULT), IP);
 

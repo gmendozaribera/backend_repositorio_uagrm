@@ -47,7 +47,6 @@ app:
     jwt:
       secreto: ${JWT_SECRET}             # obligatorio: el MISMO secreto que auth-service. Nunca en el repo.
       emisor: repositorio-uagrm
-      access-ttl-por-defecto: 1h
       refresh-ttl: 7d                    # TTL de auth:revocado-desde:{idUsuario} al cerrar sesiones
     dos-factores:
       emisor: Repositorio UAGRM
@@ -59,6 +58,10 @@ app:
   dominio:
     cache:
       ttl: ${DOMINIO_CACHE_TTL:600s}
+    # Llave AES-256 de los parametros secretos (SMTP_GROUP.PASSWORD): Base64 de 32 bytes (openssl rand -base64 32).
+    # Obligatoria: sin ella el servicio no arranca. Nunca en el repo (Secret de Kubernetes). Si se cambia, los
+    # secretos ya guardados dejan de poder descifrarse y hay que volver a cargarlos.
+    cifrado-key: ${DOMINIO_CIFRADO_KEY}
 
 management:
   endpoints:

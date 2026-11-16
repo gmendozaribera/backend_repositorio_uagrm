@@ -45,7 +45,6 @@ app:
     jwt:
       secreto: ${JWT_SECRET}             # obligatorio: Base64, minimo 32 bytes. Nunca en el repo.
       emisor: repositorio-uagrm
-      access-ttl-por-defecto: 1h         # se reemplaza por ConfigFacultad.jwtExpiracionHoras si existe
       refresh-ttl: 7d
     dos-factores:
       emisor: Repositorio UAGRM
@@ -57,6 +56,11 @@ app:
   dominio:
     cache:
       ttl: ${DOMINIO_CACHE_TTL:600s}
+
+  # Configuracion por facultad (jwtExpiracionHoras): JSON config:facultad:{idFacultad}, compartida con catalog-service
+  config-facultad:
+    cache:
+      ttl: ${CONFIG_FACULTAD_CACHE_TTL:600s}
 
   admin-inicial:
     habilitado: ${ADMIN_INICIAL_HABILITADO:false}

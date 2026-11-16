@@ -60,7 +60,6 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
         "app.seguridad.jwt.emisor=repositorio-uagrm",
-        "app.seguridad.jwt.access-ttl-por-defecto=1h",
         "app.seguridad.jwt.refresh-ttl=7d",
         "app.seguridad.dos-factores.emisor=Repositorio UAGRM",
         "app.seguridad.dos-factores.ttl-pendiente=300s",

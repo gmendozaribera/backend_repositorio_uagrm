@@ -70,3 +70,8 @@ Todo cambio de API empieza editando el YAML; después el código.
     constantes SOLO en `imp` `ConstantesDominio` (nunca strings sueltos). Se lee con el servicio de dominio
     (caché Redis `config:dominio:{GRUPO}`, TTL 600 s). Se administra con `/api/v1/dominios` (user-service).
     Excepción: la infraestructura (URLs, credenciales, secretos, puertos) sigue en variables de entorno.
+    Parámetros **secretos** (flag `secreto` en `Parametro`, p. ej. `SMTP_GROUP.PASSWORD`): se guardan cifrados
+    AES-GCM (`v1:...`, `CifradorDominio`) con la llave `DOMINIO_CIFRADO_KEY` (solo user-service, obligatoria fuera
+    de dev); la API nunca devuelve su valor y solo `ParametrosService.secreto()` los descifra (uso interno).
+12. Configuración por facultad: leerla SIEMPRE con `ConfigFacultadService.configDe(idFacultad)` (fila de
+    `config_facultad` o defaults de `FACULTAD_DEFAULT_GROUP`; caché `config:facultad:{id}`, TTL 600 s).

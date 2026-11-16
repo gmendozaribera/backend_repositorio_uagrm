@@ -34,7 +34,7 @@ class RevocacionTokenServiceTest {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         when(redis.opsForValue()).thenReturn(valores);
         SeguridadProperties props = new SeguridadProperties(
-                new SeguridadProperties.Jwt("x", "test", Duration.ofHours(1), Duration.ofDays(7)),
+                new SeguridadProperties.Jwt("x", "test", Duration.ofDays(7)),
                 new SeguridadProperties.DosFactores("Test", Duration.ofMinutes(5), 5),
                 List.of("http://localhost:4200"));
         service = new RevocacionTokenService(redis, props);

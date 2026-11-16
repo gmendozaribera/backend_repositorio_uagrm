@@ -31,6 +31,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 class ParametrosServiceTest {
 
     private static final String CLAVE = "config:dominio:" + ConstantesDominio.GRUPO_AUTH;
+    private static final String CLAVE_SMTP = "config:dominio:" + ConstantesDominio.GRUPO_SMTP;
+    private static final CifradorDominio CIFRADOR = new CifradorDominio(CifradorDominioTest.LLAVE);
 
     @SuppressWarnings("unchecked")
     private final HashOperations<String, Object, Object> hashes = mock(HashOperations.class);
@@ -43,7 +45,7 @@ class ParametrosServiceTest {
     void setUp() {
         when(redis.<Object, Object>opsForHash()).thenReturn(hashes);
         when(hashes.entries(CLAVE)).thenReturn(Map.of());
-        service = new ParametrosService(redis, repository, new DominioCacheProperties(Duration.ofSeconds(600)));
+        service = new ParametrosService(redis, repository, new DominioCacheProperties(Duration.ofSeconds(600)), CIFRADOR);
     }
 
     @AfterEach
@@ -136,6 +138,65 @@ class ParametrosServiceTest {
                 .hasValue("debe ser un numero entero entre 1 y 1440");
         assertThat(ConstantesDominio.esDelSistema(ConstantesDominio.GRUPO_AUTH, ConstantesDominio.LOGIN_WAITING)).isTrue();
         assertThat(ConstantesDominio.esDelSistema("UI_GROUP", "TEMA")).isFalse();
+    }
+
+    @Test
+    void validacionPorTipo() {
+        assertThat(Parametro.SMTP_ACTIVO.validar("true")).isEmpty();
+        assertThat(Parametro.SMTP_ACTIVO.validar("si")).hasValue("debe ser 'true' o 'false'");
+        assertThat(Parametro.SMTP_SEGURIDAD.validar("SSL")).isEmpty();
+        assertThat(Parametro.SMTP_SEGURIDAD.validar("TLS")).hasValue("debe ser uno de: SSL, STARTTLS, NINGUNA");
+        assertThat(Parametro.SMTP_CORREO.validar("no-responder@uagrm.edu.bo")).isEmpty();
+        assertThat(Parametro.SMTP_CORREO.validar("sin-arroba")).isPresent();
+        assertThat(Parametro.SMTP_CORREO.validar("")).hasValue("no puede estar vacio");
+        assertThat(Parametro.SMTP_HOST.validar("smtp.gmail.com")).isEmpty();
+        assertThat(Parametro.SMTP_HOST.validar("10.0.0.5")).isEmpty();
+        assertThat(Parametro.SMTP_HOST.validar("")).isEmpty();
+        assertThat(Parametro.SMTP_HOST.validar("smtp gmail.com")).isPresent();
+        assertThat(Parametro.SMTP_HOST.validar("-malo.com")).isPresent();
+        assertThat(Parametro.SMTP_PUERTO.validar("65536")).isPresent();
+        assertThat(Parametro.SMTP_PASSWORD.validar("")).isEmpty();
+        assertThat(Parametro.SMTP_PASSWORD.validar("x".repeat(ConstantesDominio.MAXIMO_BYTES_SECRETO + 1))).isPresent();
+        assertThat(Parametro.FACULTAD_ESCALA_CALIF_MAX.validar("1000")).isEmpty();
+        assertThat(Parametro.FACULTAD_ESCALA_CALIF_MAX.validar("1001")).isPresent();
+        assertThat(Parametro.FACULTAD_JWT_EXPIRACION_HORAS.validar("25")).isPresent();
+        assertThat(ConstantesDominio.esSecreto(ConstantesDominio.GRUPO_SMTP, ConstantesDominio.PASSWORD)).isTrue();
+        assertThat(ConstantesDominio.esSecreto(ConstantesDominio.GRUPO_SMTP, ConstantesDominio.HOST)).isFalse();
+    }
+
+    @Test
+    void elSecretoMasLargoPermitidoCabeCifradoEnDomainValue() {
+        // Caracteres de 2 bytes en UTF-8: el limite es en bytes
+        String cifrado = CIFRADOR.cifrar("\u00f1".repeat(ConstantesDominio.MAXIMO_BYTES_SECRETO / 2));
+        assertThat(cifrado.length()).isLessThanOrEqualTo(500);
+    }
+
+    @Test
+    void booleanoTextoYSecretoDescifrado() {
+        String cifrado = CIFRADOR.cifrar("clave-smtp");
+        when(hashes.entries(CLAVE_SMTP)).thenReturn(Map.of(
+                ConstantesDominio.ACTIVO, "true",
+                ConstantesDominio.SEGURIDAD, "SSL",
+                ConstantesDominio.HOST, "",
+                ConstantesDominio.PASSWORD, cifrado));
+
+        assertThat(service.booleano(Parametro.SMTP_ACTIVO)).isTrue();
+        assertThat(service.texto(Parametro.SMTP_SEGURIDAD)).isEqualTo("SSL");
+        assertThat(service.texto(Parametro.SMTP_HOST)).isEmpty();
+        assertThat(service.texto(Parametro.SMTP_CORREO)).isEqualTo("no-responder@uagrm.edu.bo");  // falta: default
+        assertThat(service.secreto(Parametro.SMTP_PASSWORD)).isEqualTo("clave-smtp");
+        // Redis/BD solo tienen el cifrado
+        assertThat(service.valor(ConstantesDominio.GRUPO_SMTP, ConstantesDominio.PASSWORD)).hasValue(cifrado);
+    }
+
+    @Test
+    void secretoSinConfigurarEsVacioYLosAccesosCruzadosSonErrorDeProgramacion() {
+        when(hashes.entries(CLAVE_SMTP)).thenReturn(Map.of(ConstantesDominio.PASSWORD, ""));
+
+        assertThat(service.secreto(Parametro.SMTP_PASSWORD)).isEmpty();
+        assertThatThrownBy(() -> service.texto(Parametro.SMTP_PASSWORD)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.secreto(Parametro.SMTP_HOST)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.booleano(Parametro.SMTP_PUERTO)).isInstanceOf(IllegalArgumentException.class);
     }
 
     private void bd(String intentos, String espera) {

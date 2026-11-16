@@ -41,7 +41,8 @@ public class Dominio {
     @Column(nullable = false, length = 50)
     private String domainName;
 
-    @NotBlank
+    /** Puede ser vacio solo si el parametro lo admite (p. ej. un secreto sin configurar). Secretos: 'v1:...' cifrado. */
+    @NotNull
     @Size(max = 500)
     @Column(nullable = false, length = 500)
     private String domainValue;

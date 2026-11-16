@@ -8,6 +8,7 @@ public final class ClavesRedis {
     private static final String AUTH = "auth:";
     private static final String CATALOGO = "catalog:cache:";
     private static final String DOMINIO = "config:dominio:";
+    private static final String CONFIG_FACULTAD = "config:facultad:";
 
     private ClavesRedis() {
     }
@@ -18,6 +19,15 @@ public final class ClavesRedis {
      */
     public static String dominio(String grupo) {
         return DOMINIO + grupo;
+    }
+
+    /**
+     * config:facultad:{idFacultad} → JSON de la configuracion PERSONALIZADA de la facultad (fila de config_facultad).
+     * TTL: app.config-facultad.cache.ttl (600 s). Las facultades sin configuracion propia no se cachean aqui
+     * (usan los defaults, ya cacheados en config:dominio:FACULTAD_DEFAULT_GROUP). Se borra tras cada PUT.
+     */
+    public static String configFacultad(Integer idFacultad) {
+        return CONFIG_FACULTAD + idFacultad;
     }
 
     /** auth:rate:login:{ip} → intentos de login FALLIDOS desde esa IP. TTL: LOGIN_WAITING minutos desde el primero. */

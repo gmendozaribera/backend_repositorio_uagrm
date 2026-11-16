@@ -41,7 +41,6 @@ app:
     jwt:
       secreto: ${JWT_SECRET}             # obligatorio: el MISMO secreto que auth-service. Nunca en el repo.
       emisor: repositorio-uagrm
-      access-ttl-por-defecto: 1h
       refresh-ttl: 7d
     dos-factores:
       emisor: Repositorio UAGRM
@@ -52,6 +51,16 @@ app:
   catalogo:
     cache:
       ttl: ${CATALOGO_CACHE_TTL:600s}    # keys catalog:cache:{entidad}:{filtro}
+
+  # Defaults de config por facultad (FACULTAD_DEFAULT_GROUP): HASH config:dominio:{GRUPO}
+  dominio:
+    cache:
+      ttl: ${DOMINIO_CACHE_TTL:600s}
+
+  # Configuracion personalizada de cada facultad: JSON config:facultad:{idFacultad}
+  config-facultad:
+    cache:
+      ttl: ${CONFIG_FACULTAD_CACHE_TTL:600s}
 
 management:
   endpoints:

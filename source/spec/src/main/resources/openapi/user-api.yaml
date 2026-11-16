@@ -897,13 +897,16 @@ components:
           example: admin@uagrm.edu.bo
     ActualizarDominioRequest:
       type: object
-      required: [domainValue, description]
+      required: [description]
       properties:
         domainValue:
           type: string
+          nullable: true
           minLength: 0
           maxLength: 500
-          description: Puede ser vacio solo si el parametro lo admite (p. ej. un secreto aun sin configurar).
+          description: |
+            Valor nuevo. Omitido o null CONSERVA el valor actual (permite cambiar solo la descripcion, incluso
+            de un secreto). Vacio ('') lo deja vacio, solo si el parametro lo admite (p. ej. borrar un secreto).
           example: '10'
         description:
           type: string

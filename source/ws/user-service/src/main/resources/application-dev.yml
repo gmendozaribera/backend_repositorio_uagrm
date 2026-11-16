@@ -10,3 +10,6 @@ app:
       # Secreto SOLO de desarrollo, el mismo que application-dev.yml de auth-service.
       # En Kubernetes llega por Secret (JWT_SECRET).
       secreto: ${JWT_SECRET:ZGV2LXNvbG8tcGFyYS1kZXNhcnJvbGxvLWNhbWJpYXItZW4tcHJvZHVjY2lvbiE=}
+  dominio:
+    # Llave de cifrado SOLO de desarrollo ("dev-solo-cifrado-dominio-32bytes"). En Kubernetes: DOMINIO_CIFRADO_KEY.
+    cifrado-key: ${DOMINIO_CIFRADO_KEY:ZGV2LXNvbG8tY2lmcmFkby1kb21pbmlvLTMyYnl0ZXM=}

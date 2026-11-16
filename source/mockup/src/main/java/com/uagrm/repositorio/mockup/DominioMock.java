@@ -28,6 +28,13 @@ public final class DominioMock {
     }
 
     public static DominioResponse response(Integer id, String grupo, String nombre, String valor, boolean sistema) {
-        return new DominioResponse(id, grupo, nombre, valor, "Parametro " + nombre, "admin", FECHA, sistema);
+        return new DominioResponse(id, grupo, nombre, valor, "Parametro " + nombre, "admin", FECHA, sistema,
+                false, true);
+    }
+
+    /** Respuesta de un parametro secreto: domainValue siempre vacio. */
+    public static DominioResponse secreto(Integer id, String grupo, String nombre, boolean configurado) {
+        return new DominioResponse(id, grupo, nombre, "", "Parametro " + nombre, "admin", FECHA, true,
+                true, configurado);
     }
 }

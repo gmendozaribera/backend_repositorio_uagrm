@@ -11,5 +11,11 @@ dependencies {
     implementation "org.apache.commons:commons-csv:${commonsCsvVersion}"
     implementation "org.apache.poi:poi-ooxml:${poiVersion}"
 
+    // Correo saliente (prueba SMTP y notificaciones futuras). Sin spring.mail.* no se autoconfigura ningun sender:
+    // CorreoService arma el suyo con los parametros de SMTP_GROUP de la tabla dominio.
+    api 'org.springframework.boot:spring-boot-starter-mail'
+
     testImplementation project(':mockup')
+    // Servidor SMTP falso en memoria para probar CorreoService
+    testImplementation "com.icegreen:greenmail:${greenmailVersion}"
 }

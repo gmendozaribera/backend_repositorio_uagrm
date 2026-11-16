@@ -38,6 +38,11 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/error").permitAll()
+                        // Configuracion por facultad: la lee cualquier rol (p. ej. el limite de tamano de archivo),
+                        // solo el ADMIN la cambia. Explicito para que una regla futura no la abra por error.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/facultades/*/config")
+                        .hasAnyRole(TipoUsuario.ADMIN, TipoUsuario.DOCENTE, TipoUsuario.ESTUDIANTE)
+                        .requestMatchers("/api/v1/facultades/*/config").hasRole(TipoUsuario.ADMIN)
                         .requestMatchers(HttpMethod.GET, "/api/v1/**")
                         .hasAnyRole(TipoUsuario.ADMIN, TipoUsuario.DOCENTE, TipoUsuario.ESTUDIANTE)
                         .requestMatchers("/api/v1/**").hasRole(TipoUsuario.ADMIN)

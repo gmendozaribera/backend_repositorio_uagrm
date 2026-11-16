@@ -3,7 +3,6 @@ package com.uagrm.repositorio.imp.service;
 import com.uagrm.repositorio.dao.entity.Carrera;
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.Usuario;
-import com.uagrm.repositorio.dao.repository.ConfigFacultadRepository;
 import com.uagrm.repositorio.dao.repository.UsuarioRepository;
 import com.uagrm.repositorio.dto.auth.CambioPasswordRequest;
 import com.uagrm.repositorio.dto.auth.LoginRequest;
@@ -13,13 +12,13 @@ import com.uagrm.repositorio.dto.auth.RefreshRequest;
 import com.uagrm.repositorio.dto.auth.TokenResponse;
 import com.uagrm.repositorio.dto.auth.VerificarDosFactoresRequest;
 import com.uagrm.repositorio.dto.mapper.UsuarioMapper;
-import com.uagrm.repositorio.imp.config.SeguridadProperties;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.DosFactoresPendienteService;
 import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.TotpService;
+import com.uagrm.repositorio.imp.service.catalogo.ConfigFacultadService;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -41,7 +40,7 @@ public class AuthService {
     private static final String PASSWORD_FICTICIA = "usuario-inexistente";
 
     private final UsuarioRepository usuarioRepository;
-    private final ConfigFacultadRepository configFacultadRepository;
+    private final ConfigFacultadService configFacultadService;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final TotpService totpService;
@@ -49,7 +48,6 @@ public class AuthService {
     private final DosFactoresPendienteService dosFactoresPendienteService;
     private final LimiteIntentosService limiteIntentos;
     private final UsuarioMapper usuarioMapper;
-    private final SeguridadProperties props;
 
     private volatile String hashFicticio;
 
@@ -170,14 +168,14 @@ public class AuthService {
                 par.accessTtl().toSeconds(), usuarioMapper.toSesion(usuario));
     }
 
-    /** Duracion del access token: ConfigFacultad.jwtExpiracionHoras de la facultad del usuario, o el valor por defecto. */
+    /**
+     * Duracion del access token: jwtExpiracionHoras de la configuracion de la facultad del usuario (la propia o,
+     * si no la guardo, FACULTAD_DEFAULT_GROUP.JWT_EXPIRACION_HORAS de la tabla dominio). Sin carrera (p. ej. el
+     * admin inicial) se usa directamente el valor por defecto de dominio.
+     */
     private Duration accessTtl(Usuario usuario) {
         Carrera carrera = usuario.getPersona().getCarrera();
-        if (carrera == null) {
-            return props.jwt().accessTtlPorDefecto();
-        }
-        return configFacultadRepository.findByFacultadIdFacultad(carrera.getFacultad().getIdFacultad())
-                .map(config -> Duration.ofHours(config.getJwtExpiracionHoras()))
-                .orElse(props.jwt().accessTtlPorDefecto());
+        Integer idFacultad = carrera == null ? null : carrera.getFacultad().getIdFacultad();
+        return Duration.ofHours(configFacultadService.configDe(idFacultad).jwtExpiracionHoras());
     }
 }

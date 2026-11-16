@@ -14,7 +14,6 @@ import static org.mockito.Mockito.when;
 
 import com.uagrm.repositorio.dao.entity.Estado;
 import com.uagrm.repositorio.dao.entity.Usuario;
-import com.uagrm.repositorio.dao.repository.ConfigFacultadRepository;
 import com.uagrm.repositorio.dao.repository.UsuarioRepository;
 import com.uagrm.repositorio.dto.auth.CambioPasswordRequest;
 import com.uagrm.repositorio.dto.auth.LoginRequest;
@@ -22,7 +21,6 @@ import com.uagrm.repositorio.dto.auth.LoginResponse;
 import com.uagrm.repositorio.dto.auth.RefreshRequest;
 import com.uagrm.repositorio.dto.auth.TokenResponse;
 import com.uagrm.repositorio.dto.mapper.UsuarioMapperImpl;
-import com.uagrm.repositorio.imp.config.SeguridadProperties;
 import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.DosFactoresPendienteService;
@@ -30,9 +28,11 @@ import com.uagrm.repositorio.imp.redis.LimiteIntentosService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.TotpService;
+import com.uagrm.repositorio.imp.service.catalogo.ConfigFacultadService;
+import com.uagrm.repositorio.mockup.CatalogoMock;
+import com.uagrm.repositorio.mockup.ConfigFacultadMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import java.time.Duration;
-import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,7 +46,7 @@ class AuthServiceTest {
     private static final String IP = "203.0.113.7";
 
     private final UsuarioRepository usuarioRepository = mock(UsuarioRepository.class);
-    private final ConfigFacultadRepository configFacultadRepository = mock(ConfigFacultadRepository.class);
+    private final ConfigFacultadService configFacultad = mock(ConfigFacultadService.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
     private final JwtService jwtService = mock(JwtService.class);
     private final TotpService totpService = mock(TotpService.class);
@@ -59,12 +59,9 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        SeguridadProperties props = new SeguridadProperties(
-                new SeguridadProperties.Jwt("c2VjcmV0bw==", "test", Duration.ofHours(1), Duration.ofDays(7)),
-                new SeguridadProperties.DosFactores("Test", Duration.ofMinutes(5), 5),
-                List.of("http://localhost:4200"));
-        authService = new AuthService(usuarioRepository, configFacultadRepository, passwordEncoder, jwtService,
-                totpService, revocacionTokenService, dosFactoresPendienteService, limiteIntentos, new UsuarioMapperImpl(), props);
+        authService = new AuthService(usuarioRepository, configFacultad, passwordEncoder, jwtService,
+                totpService, revocacionTokenService, dosFactoresPendienteService, limiteIntentos, new UsuarioMapperImpl());
+        when(configFacultad.configDe(any())).thenReturn(ConfigFacultadMock.porDefecto(null));
 
         usuario = UsuarioMock.estudiante();
         when(usuarioRepository.findByUsuario(usuario.getUsuario())).thenReturn(Optional.of(usuario));
@@ -145,6 +142,30 @@ class AuthServiceTest {
                 .isInstanceOfSatisfying(NegocioException.class,
                         ex -> assertThat(ex.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED));
         verify(jwtService, never()).generar(any(), any());
+    }
+
+    // ---------- duracion del access token ----------
+
+    @Test
+    void elAccessTokenDuraLasHorasConfiguradasParaLaFacultadDelUsuario() {
+        usuario.getPersona().setCarrera(CatalogoMock.carrera(CatalogoMock.facultad()));
+        Integer idFacultad = usuario.getPersona().getCarrera().getFacultad().getIdFacultad();
+        when(configFacultad.configDe(idFacultad)).thenReturn(ConfigFacultadMock.personalizada(idFacultad, 8));
+
+        authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP);
+
+        verify(jwtService).generar(usuario, Duration.ofHours(8));
+    }
+
+    @Test
+    void sinCarreraUsaElValorPorDefectoDeDominio() {
+        usuario.getPersona().setCarrera(null);
+        when(configFacultad.configDe(null)).thenReturn(ConfigFacultadMock.porDefecto(null));
+
+        authService.login(new LoginRequest(usuario.getUsuario(), PASSWORD), IP);
+
+        verify(configFacultad).configDe(null);
+        verify(jwtService).generar(usuario, Duration.ofHours(ConfigFacultadMock.HORAS_POR_DEFECTO));
     }
 
     // ---------- limite de intentos por IP ----------

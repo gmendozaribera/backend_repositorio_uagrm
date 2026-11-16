@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.atlassian.oai.validator.OpenApiInteractionValidator;
@@ -18,6 +19,7 @@ import com.atlassian.oai.validator.report.LevelResolver;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.uagrm.repositorio.catalog.config.SecurityConfig;
 import com.uagrm.repositorio.catalog.controller.CarreraController;
+import com.uagrm.repositorio.catalog.controller.ConfigFacultadController;
 import com.uagrm.repositorio.catalog.controller.FacultadController;
 import com.uagrm.repositorio.catalog.controller.FaseController;
 import com.uagrm.repositorio.catalog.controller.GrupoController;
@@ -34,6 +36,7 @@ import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import com.uagrm.repositorio.imp.service.catalogo.CarreraService;
+import com.uagrm.repositorio.imp.service.catalogo.ConfigFacultadService;
 import com.uagrm.repositorio.imp.service.catalogo.FacultadService;
 import com.uagrm.repositorio.imp.service.catalogo.FaseService;
 import com.uagrm.repositorio.imp.service.catalogo.GrupoService;
@@ -41,6 +44,7 @@ import com.uagrm.repositorio.imp.service.catalogo.MateriaService;
 import com.uagrm.repositorio.imp.service.catalogo.SemestreService;
 import com.uagrm.repositorio.imp.service.catalogo.TipoTrabajoService;
 import com.uagrm.repositorio.mockup.CatalogoMock;
+import com.uagrm.repositorio.mockup.ConfigFacultadMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import java.time.Duration;
 import java.util.List;
@@ -62,13 +66,12 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  * seguridad por rol, ProblemDetail) cumplen spec/openapi/catalog-api.yaml. Cubre todos los endpoints.
  * Los servicios estan mockeados: aqui se prueba la forma de la API, no la logica de negocio.
  */
-@WebMvcTest(controllers = {FacultadController.class, CarreraController.class, MateriaController.class,
+@WebMvcTest(controllers = {FacultadController.class, ConfigFacultadController.class, CarreraController.class, MateriaController.class,
         SemestreController.class, GrupoController.class, FaseController.class, TipoTrabajoController.class})
 @Import({SecurityConfig.class, SeguridadConfig.class, SeguridadErrorHandler.class, JwtService.class})
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
         "app.seguridad.jwt.emisor=repositorio-uagrm",
-        "app.seguridad.jwt.access-ttl-por-defecto=1h",
         "app.seguridad.jwt.refresh-ttl=7d",
         "app.seguridad.dos-factores.emisor=Repositorio UAGRM",
         "app.seguridad.dos-factores.ttl-pendiente=300s",
@@ -97,6 +100,9 @@ class CatalogContratoTest {
     private static final String SEMESTRE = "{\"semestre\":2,\"anio\":2026,\"idFacultad\":1,\"estado\":1}";
     private static final String GRUPO = "{\"nombre\":\"SA\",\"idMateria\":20,\"idSemestre\":30}";
     private static final String FASE = "{\"nombre\":\"Perfil\",\"descripcion\":\"Propuesta inicial\",\"idFacultad\":1}";
+    private static final String CONFIG = """
+            {"tamanoMaxArchivoMB":20,"umbralPlagioMedio":25,"umbralPlagioAlto":60,"comparacionInternet":true,
+             "accesoExterno":false,"escalaCalifMax":70,"jwtExpiracionHoras":8}""";
     private static final String TIPO = "{\"nombre\":\"Proyecto de grado\",\"idFacultad\":1}";
 
     @Autowired
@@ -110,6 +116,8 @@ class CatalogContratoTest {
     @MockitoBean
     private CarreraService carreraService;
     @MockitoBean
+    private ConfigFacultadService configFacultadService;
+    @MockitoBean
     private MateriaService materiaService;
     @MockitoBean
     private SemestreService semestreService;
@@ -121,6 +129,52 @@ class CatalogContratoTest {
     private TipoTrabajoService tipoTrabajoService;
     @MockitoBean
     private RevocacionTokenService revocacionTokenService;
+
+    // ---------- Configuracion por facultad ----------
+
+    @Test
+    void configFacultadSinPersonalizarYGuardada() throws Exception {
+        when(configFacultadService.obtener(1)).thenReturn(ConfigFacultadMock.porDefecto(1));
+        when(configFacultadService.actualizar(eq(1), any())).thenReturn(ConfigFacultadMock.personalizada(1, 8));
+
+        llamar(get("/api/v1/facultades/1/config"), estudiante(), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.personalizada").value(false))
+                .andExpect(cumpleContrato());
+        llamar(get("/api/v1/facultades/1/config"), docente(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(put("/api/v1/facultades/1/config"), admin(), CONFIG)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.personalizada").value(true))
+                .andExpect(cumpleContrato());
+    }
+
+    @Test
+    void soloAdminGuardaLaConfigFacultad() throws Exception {
+        llamar(put("/api/v1/facultades/1/config"), estudiante(), CONFIG)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(put("/api/v1/facultades/1/config"), docente(), CONFIG)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/facultades/1/config"), null, null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void configFacultadInvalidaOInexistente() throws Exception {
+        when(configFacultadService.obtener(99)).thenThrow(NegocioException.noEncontrado("No existe la facultad 99."));
+        when(configFacultadService.actualizar(eq(1), any())).thenThrow(
+                NegocioException.campoInvalido("umbralPlagioMedio", "debe ser menor que umbralPlagioAlto"));
+
+        llamar(get("/api/v1/facultades/99/config"), estudiante(), null)
+                .andExpect(status().isNotFound()).andExpect(cumpleContrato());
+        llamar(put("/api/v1/facultades/1/config"), admin(), CONFIG)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores.umbralPlagioMedio").value("debe ser menor que umbralPlagioAlto"))
+                .andExpect(cumpleContrato());
+        llamar(put("/api/v1/facultades/1/config"), admin(), CONFIG.replace("\"jwtExpiracionHoras\":8", "\"jwtExpiracionHoras\":25"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores.jwtExpiracionHoras").exists())
+                .andExpect(cumpleContratoSoloRespuesta());
+    }
 
     // ---------- Facultades ----------
 

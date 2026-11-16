@@ -6,13 +6,16 @@ import com.uagrm.repositorio.dto.dominio.ActualizarDominioRequest;
 import com.uagrm.repositorio.dto.dominio.CrearDominioRequest;
 import com.uagrm.repositorio.dto.dominio.DominioResponse;
 import com.uagrm.repositorio.dto.mapper.DominioMapper;
+import com.uagrm.repositorio.imp.dominio.CifradorDominio;
 import com.uagrm.repositorio.imp.dominio.ConstantesDominio;
+import com.uagrm.repositorio.imp.dominio.ConstantesDominio.Parametro;
 import com.uagrm.repositorio.imp.dominio.ParametrosService;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.security.JwtService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -22,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Administracion de la tabla de dominio (parametros configurables, regla 11). Toda escritura borra la cache
  * Redis del grupo despues del commit: el cambio aplica al instante en todos los servicios.
  * Los parametros del sistema (declarados en {@link ConstantesDominio}) no se eliminan y su valor se valida.
+ * Los secretos se guardan cifrados ({@link CifradorDominio}) y la respuesta nunca incluye su valor.
  */
 @Service
 @RequiredArgsConstructor
@@ -32,6 +36,7 @@ public class DominioService {
     private final DominioRepository repository;
     private final DominioMapper mapper;
     private final ParametrosService parametros;
+    private final CifradorDominio cifrador;
 
     @Transactional(readOnly = true)
     public List<DominioResponse> listar(String domainGroup) {
@@ -56,20 +61,28 @@ public class DominioService {
                     + dominio.getDomainName() + ".");
         }
         normalizar(dominio);
-        validarValor(dominio);
+        validarYCifrar(dominio);
         auditar(dominio, admin);
         Dominio guardado = repository.save(dominio);
         parametros.invalidar(guardado.getDomainGroup());
         return toResponse(guardado);
     }
 
-    /** Solo valor y descripcion: grupo y nombre son inmutables porque el codigo los referencia por nombre. */
+    /**
+     * Solo valor y descripcion: grupo y nombre son inmutables porque el codigo los referencia por nombre.
+     * domainValue null/omitido conserva el valor actual tal cual (sin revalidar ni recifrar): asi se puede cambiar
+     * la descripcion de un secreto sin conocer ni borrar su valor.
+     */
     @Transactional
     public DominioResponse actualizar(Jwt admin, Integer id, ActualizarDominioRequest request) {
         Dominio dominio = buscar(id);
         mapper.actualizar(request, dominio);
-        normalizar(dominio);
-        validarValor(dominio);
+        if (request.domainValue() == null) {
+            dominio.setDescription(dominio.getDescription().trim());
+        } else {
+            normalizar(dominio);
+            validarYCifrar(dominio);
+        }
         auditar(dominio, admin);
         parametros.invalidar(dominio.getDomainGroup());
         return toResponse(dominio);
@@ -94,21 +107,34 @@ public class DominioService {
                 .orElseThrow(() -> NegocioException.noEncontrado("No existe el parametro " + id + "."));
     }
 
+    /** Un secreto nunca sale de aqui: domainValue = "" y configurado = tiene valor guardado (DominioMapper). */
     private DominioResponse toResponse(Dominio dominio) {
-        return mapper.toResponse(dominio, ConstantesDominio.esDelSistema(dominio.getDomainGroup(), dominio.getDomainName()));
+        Optional<Parametro> parametro = ConstantesDominio.buscar(dominio.getDomainGroup(), dominio.getDomainName());
+        return mapper.toResponse(dominio, parametro.isPresent(), parametro.map(Parametro::secreto).orElse(false));
     }
 
-    /** Si es un parametro del sistema, su valor debe cumplir el tipo y rango declarados (400 en domainValue). */
-    private static void validarValor(Dominio dominio) {
-        ConstantesDominio.buscar(dominio.getDomainGroup(), dominio.getDomainName())
-                .flatMap(parametro -> parametro.validar(dominio.getDomainValue()))
-                .ifPresent(error -> {
-                    throw NegocioException.campoInvalido(CAMPO_VALOR, error);
-                });
+    /**
+     * Parametro del sistema: su valor debe cumplir el tipo y rango declarados (400 en domainValue); si es secreto
+     * se valida el texto plano y se guarda cifrado (AES-GCM, vacio queda vacio). Parametro libre: no vacio.
+     */
+    private void validarYCifrar(Dominio dominio) {
+        Optional<Parametro> parametro = ConstantesDominio.buscar(dominio.getDomainGroup(), dominio.getDomainName());
+        Optional<String> error = parametro.isPresent()
+                ? parametro.get().validar(dominio.getDomainValue())
+                : dominio.getDomainValue().isEmpty() ? Optional.of("no puede estar vacio") : Optional.empty();
+        error.ifPresent(mensaje -> {
+            throw NegocioException.campoInvalido(CAMPO_VALOR, mensaje);
+        });
+        if (parametro.isPresent() && parametro.get().secreto()) {
+            dominio.setDomainValue(cifrador.cifrar(dominio.getDomainValue()));
+        }
     }
 
+    /** Los secretos no se recortan: un espacio al inicio o al final puede ser parte de una contrasena. */
     private static void normalizar(Dominio dominio) {
-        dominio.setDomainValue(dominio.getDomainValue().trim());
+        if (!ConstantesDominio.esSecreto(dominio.getDomainGroup(), dominio.getDomainName())) {
+            dominio.setDomainValue(dominio.getDomainValue().trim());
+        }
         dominio.setDescription(dominio.getDescription().trim());
     }
 

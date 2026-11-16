@@ -105,6 +105,8 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
+      # Llave AES de los parametros secretos de la tabla dominio (SMTP_GROUP.PASSWORD). Solo la recibe user-service.
+      DOMINIO_CIFRADO_KEY: ${DOMINIO_CIFRADO_KEY:-ZGV2LXNvbG8tY2lmcmFkby1kb21pbmlvLTMyYnl0ZXM=}
     ports:
       - "8083:8083"
     depends_on:

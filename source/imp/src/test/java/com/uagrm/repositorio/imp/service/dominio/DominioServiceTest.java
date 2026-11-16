@@ -14,6 +14,8 @@ import com.uagrm.repositorio.dto.dominio.ActualizarDominioRequest;
 import com.uagrm.repositorio.dto.dominio.CrearDominioRequest;
 import com.uagrm.repositorio.dto.dominio.DominioResponse;
 import com.uagrm.repositorio.dto.mapper.DominioMapperImpl;
+import com.uagrm.repositorio.imp.dominio.CifradorDominio;
+import com.uagrm.repositorio.imp.dominio.CifradorDominioTest;
 import com.uagrm.repositorio.imp.dominio.ConstantesDominio;
 import com.uagrm.repositorio.imp.dominio.ParametrosService;
 import com.uagrm.repositorio.imp.exception.NegocioException;
@@ -31,14 +33,18 @@ class DominioServiceTest {
 
     private final DominioRepository repository = mock(DominioRepository.class);
     private final ParametrosService parametros = mock(ParametrosService.class);
+    private final CifradorDominio cifrador = new CifradorDominio(CifradorDominioTest.LLAVE);
 
     private DominioService service;
     private Dominio intentos;
     private Dominio libre;
+    private Dominio password;
 
     @BeforeEach
     void setUp() {
-        service = new DominioService(repository, new DominioMapperImpl(), parametros);
+        service = new DominioService(repository, new DominioMapperImpl(), parametros, cifrador);
+        password = DominioMock.dominio(5, ConstantesDominio.GRUPO_SMTP, ConstantesDominio.PASSWORD, "");
+        when(repository.findById(5)).thenReturn(Optional.of(password));
         intentos = DominioMock.dominio(1, ConstantesDominio.GRUPO_AUTH, ConstantesDominio.LOGIN_INTENTOS, "10");
         libre = DominioMock.dominio(3, "UI_GROUP", "TEMA", "claro");
         when(repository.findById(1)).thenReturn(Optional.of(intentos));
@@ -107,6 +113,72 @@ class DominioServiceTest {
 
         // Un parametro libre acepta cualquier texto
         service.actualizar(admin(), 3, new ActualizarDominioRequest("oscuro", "Tema"));
+    }
+
+    @Test
+    void unSecretoSeGuardaCifradoYNuncaSeDevuelve() {
+        DominioResponse respuesta = service.actualizar(admin(), 5,
+                new ActualizarDominioRequest(" clave con espacios ", "Contrasena SMTP"));
+
+        assertThat(password.getDomainValue()).startsWith(CifradorDominio.PREFIJO);
+        // No se recorta: los espacios pueden ser parte de la contrasena
+        assertThat(cifrador.descifrar(password.getDomainValue())).isEqualTo(" clave con espacios ");
+        assertThat(respuesta.domainValue()).isEmpty();
+        assertThat(respuesta.secreto()).isTrue();
+        assertThat(respuesta.configurado()).isTrue();
+        assertThat(service.obtener(5).domainValue()).isEmpty();
+        verify(parametros).invalidar(ConstantesDominio.GRUPO_SMTP);
+    }
+
+    @Test
+    void putSoloConDescripcionConservaElSecretoCifradoYPutVacioLoBorra() {
+        String cifrado = cifrador.cifrar("clave-actual");
+        password.setDomainValue(cifrado);
+
+        DominioResponse soloDescripcion = service.actualizar(admin(), 5,
+                new ActualizarDominioRequest(null, " Nueva descripcion "));
+
+        assertThat(password.getDomainValue()).isEqualTo(cifrado);
+        assertThat(password.getDescription()).isEqualTo("Nueva descripcion");
+        assertThat(soloDescripcion.configurado()).isTrue();
+        assertThat(soloDescripcion.domainValue()).isEmpty();
+
+        DominioResponse borrado = service.actualizar(admin(), 5, new ActualizarDominioRequest("", "Sin contrasena"));
+        assertThat(password.getDomainValue()).isEmpty();
+        assertThat(borrado.configurado()).isFalse();
+    }
+
+    @Test
+    void noSecretoConValorNullConservaElValorActual() {
+        DominioResponse respuesta = service.actualizar(admin(), 1, new ActualizarDominioRequest(null, "Solo descripcion"));
+
+        assertThat(intentos.getDomainValue()).isEqualTo("10");
+        assertThat(respuesta.domainValue()).isEqualTo("10");
+        assertThat(respuesta.description()).isEqualTo("Solo descripcion");
+        verify(parametros).invalidar(ConstantesDominio.GRUPO_AUTH);
+    }
+
+    @Test
+    void unSecretoVacioQuedaSinConfigurar() {
+        DominioResponse respuesta = service.actualizar(admin(), 5, new ActualizarDominioRequest("", "Sin contrasena"));
+
+        assertThat(password.getDomainValue()).isEmpty();
+        assertThat(respuesta.configurado()).isFalse();
+        assertThat(respuesta.secreto()).isTrue();
+    }
+
+    @Test
+    void losNoSecretosSiempreEstanConfiguradosYNoAdmitenVacioSalvoQueElParametroLoPermita() {
+        DominioResponse intentosResp = service.obtener(1);
+        assertThat(intentosResp.secreto()).isFalse();
+        assertThat(intentosResp.configurado()).isTrue();
+        assertThat(intentosResp.domainValue()).isEqualTo("10");
+
+        assertThatThrownBy(() -> service.actualizar(admin(), 1, new ActualizarDominioRequest(" ", "x")))
+                .isInstanceOfSatisfying(NegocioException.class,
+                        ex -> assertThat(ex.getErrores()).isEqualTo(Map.of("domainValue", "no puede estar vacio")));
+        assertThatThrownBy(() -> service.actualizar(admin(), 3, new ActualizarDominioRequest("", "x")))
+                .isInstanceOf(NegocioException.class);
     }
 
     @Test

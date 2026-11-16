@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -35,6 +36,7 @@ import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
+import com.uagrm.repositorio.imp.service.correo.CorreoService;
 import com.uagrm.repositorio.imp.service.dominio.DominioService;
 import com.uagrm.repositorio.imp.service.padron.PadronService;
 import com.uagrm.repositorio.imp.service.usuario.UsuarioService;
@@ -43,6 +45,7 @@ import com.uagrm.repositorio.mockup.DominioMock;
 import com.uagrm.repositorio.mockup.PadronMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import com.uagrm.repositorio.user.config.SecurityConfig;
+import com.uagrm.repositorio.user.controller.ConfigSmtpController;
 import com.uagrm.repositorio.user.controller.DominioController;
 import com.uagrm.repositorio.user.controller.PadronController;
 import com.uagrm.repositorio.user.controller.TipoUsuarioController;
@@ -70,12 +73,11 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  * Los servicios estan mockeados: aqui se prueba la forma de la API, no la logica de negocio.
  */
 @WebMvcTest(controllers = {UsuarioController.class, TipoUsuarioController.class, PadronController.class,
-        DominioController.class})
+        DominioController.class, ConfigSmtpController.class})
 @Import({SecurityConfig.class, SeguridadConfig.class, SeguridadErrorHandler.class, JwtService.class})
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
         "app.seguridad.jwt.emisor=repositorio-uagrm",
-        "app.seguridad.jwt.access-ttl-por-defecto=1h",
         "app.seguridad.jwt.refresh-ttl=7d",
         "app.seguridad.dos-factores.emisor=Repositorio UAGRM",
         "app.seguridad.dos-factores.ttl-pendiente=300s",
@@ -134,6 +136,8 @@ class UserContratoTest {
     private PadronService padronService;
     @MockitoBean
     private DominioService dominioService;
+    @MockitoBean
+    private CorreoService correoService;
     @MockitoBean
     private RevocacionTokenService revocacionTokenService;
 
@@ -383,6 +387,76 @@ class UserContratoTest {
                 .andExpect(cumpleContrato());
         llamar(put("/api/v1/dominios/1"), admin(), "{\"domainValue\":\"\"}")
                 .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void unSecretoSeDevuelveSinValorYSePuedeCambiarSoloLaDescripcion() throws Exception {
+        DominioResponse password = DominioMock.secreto(12, ConstantesDominio.GRUPO_SMTP, ConstantesDominio.PASSWORD, true);
+        when(dominioService.actualizar(any(), eq(12), any())).thenReturn(password);
+        when(dominioService.listar(any())).thenReturn(List.of(password,
+                DominioMock.secreto(13, ConstantesDominio.GRUPO_SMTP, "OTRO_SECRETO", false)));
+
+        llamar(get("/api/v1/dominios").param("domainGroup", ConstantesDominio.GRUPO_SMTP), admin(), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].domainValue").value(""))
+                .andExpect(jsonPath("$.data[0].secreto").value(true))
+                .andExpect(jsonPath("$.data[0].configurado").value(true))
+                .andExpect(jsonPath("$.data[1].configurado").value(false))
+                .andExpect(cumpleContrato());
+        // Valor nuevo, valor vacio (borrar el secreto) y solo descripcion (domainValue omitido o null: conserva)
+        llamar(put("/api/v1/dominios/12"), admin(), "{\"domainValue\":\"nueva-clave\",\"description\":\"Clave SMTP\"}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.domainValue").value(""))
+                .andExpect(cumpleContrato());
+        llamar(put("/api/v1/dominios/12"), admin(), "{\"domainValue\":\"\",\"description\":\"Clave SMTP\"}")
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(put("/api/v1/dominios/12"), admin(), "{\"description\":\"Solo descripcion\"}")
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(put("/api/v1/dominios/12"), admin(), "{\"domainValue\":null,\"description\":\"Solo descripcion\"}")
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        // Omitido y null llegan igual al service: null = conservar
+        verify(dominioService, times(2)).actualizar(any(), eq(12), eq(
+                new com.uagrm.repositorio.dto.dominio.ActualizarDominioRequest(null, "Solo descripcion")));
+    }
+
+    // ---------- Prueba SMTP ----------
+
+    @Test
+    void pruebaSmtpEnviada() throws Exception {
+        llamar(post("/api/v1/config/smtp/prueba"), admin(), "{\"destinatario\":\"admin@uagrm.edu.bo\"}")
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        verify(correoService).enviarPrueba("admin@uagrm.edu.bo");
+    }
+
+    @Test
+    void pruebaSmtpSinConfigurarODestinatarioInvalidoDevuelve400() throws Exception {
+        doThrow(new NegocioException(HttpStatus.BAD_REQUEST, "Configuracion de correo incompleta",
+                "Falta configurar HOST del grupo SMTP_GROUP en /api/v1/dominios."))
+                .when(correoService).enviarPrueba(any());
+
+        llamar(post("/api/v1/config/smtp/prueba"), admin(), "{\"destinatario\":\"admin@uagrm.edu.bo\"}")
+                .andExpect(status().isBadRequest()).andExpect(cumpleContrato());
+        llamar(post("/api/v1/config/smtp/prueba"), admin(), "{\"destinatario\":\"no-es-correo\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores.destinatario").exists())
+                .andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void pruebaSmtpConServidorQueFallaDevuelve502() throws Exception {
+        doThrow(new NegocioException(HttpStatus.BAD_GATEWAY, "Error del servidor de correo",
+                "No se pudo autenticar en smtp.gmail.com:587: credenciales rechazadas."))
+                .when(correoService).enviarPrueba(any());
+
+        llamar(post("/api/v1/config/smtp/prueba"), admin(), "{\"destinatario\":\"admin@uagrm.edu.bo\"}")
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.detail").value("No se pudo autenticar en smtp.gmail.com:587: credenciales rechazadas."))
+                .andExpect(cumpleContrato());
+    }
+
+    @Test
+    void docenteNoPuedeProbarSmtp() throws Exception {
+        llamar(post("/api/v1/config/smtp/prueba"), docente(), "{\"destinatario\":\"admin@uagrm.edu.bo\"}")
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
     }
 
     @Test

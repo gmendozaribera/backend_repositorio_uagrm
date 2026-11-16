@@ -18,13 +18,13 @@ public record SeguridadProperties(
         @NotEmpty List<String> corsOrigenes) {
 
     /**
-     * @param secreto              clave HMAC en Base64, minimo 256 bits (32 bytes)
-     * @param accessTtlPorDefecto  se usa cuando el usuario no pertenece a una facultad con ConfigFacultad
+     * @param secreto    clave HMAC en Base64, minimo 256 bits (32 bytes)
+     * @param refreshTtl vida del refresh token. La del access token NO esta aqui: es jwtExpiracionHoras de la
+     *                   configuracion de la facultad (o FACULTAD_DEFAULT_GROUP de la tabla dominio)
      */
     public record Jwt(
             @NotBlank String secreto,
             @NotBlank String emisor,
-            @NotNull Duration accessTtlPorDefecto,
             @NotNull Duration refreshTtl) {
     }
 
