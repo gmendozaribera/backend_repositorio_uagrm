@@ -57,9 +57,9 @@ const DECISIONS = [
   ]},
   { cat:"Stack y contratos (decisiones de implementación)", items:[
     { q:"Versión del stack", a:"Java 25 + Spring Boot 4.1.1 (Spring Security 7, Jackson 3, Hibernate 7, Gradle 9 multimodulo) en lugar de Java 17 / Boot 3. Frontend Angular 22 standalone, zoneless, signals, sin librería UI (CSS propio con la paleta del modelo), tests con Vitest." },
-    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.3.0." },
+    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.3.0, work-api 1.0.0." },
     { q:"Control de cambios de contrato", a:"script/contratos.sh (etapa 'Contratos' de Jenkins): Redocly lint + oasdiff breaking contra origin/main. Un breaking change falla el build salvo que se suba la versión MAYOR de info.version." },
-    { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012." },
+    { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012, work :4013." },
     { q:"Puertos de los microservicios", a:"auth-service :8081, catalog-service :8082, user-service :8083 (se intercambiaron user y catalog respecto al modelo original porque catálogos se implementó primero). Nginx/proxy enrutan por prefijo: /api/v1/auth → 8081; /api/v1/usuarios, /tipos-usuario, /padron → 8083; resto → 8082." },
     { q:"Migraciones", a:"Flyway en source/dao; las aplica SOLO auth-service. Los demás servicios validan el esquema (ddl-auto: validate) y en docker-compose esperan el healthcheck de auth-service. Futuro K8s: Job de migración dedicado." },
     { q:"Formato de respuestas", a:"Éxito: { data, message, status, timestamp } con un envoltorio plano por tipo en OpenAPI (RespuestaX) porque 3.0 no tiene genéricos. Error: ProblemDetail RFC 7807 con timestamp y, en validaciones, mapa 'errores' campo → mensaje." },
@@ -86,7 +86,9 @@ const DECISIONS = [
     { q:"Múltiples documentos por trabajo", a:"Sí. Un trabajo puede tener N documentos asociados, cada uno asignado a una Fase." },
     { q:"Aprobación con observaciones", a:"Sí. Estado: APROBADO_CON_OBSERVACIONES. El estudiante puede subir versión corregida." },
     { q:"Visibilidad trabajos no aprobados", a:"Solo el autor y el docente asignado. No aparecen en búsqueda pública. Solo trabajos EVALUADOS son visibles." },
-    { q:"Estados del trabajo", a:"PENDIENTE → EN_REVISION → APROBADO | APROBADO_CON_OBSERVACIONES | RECHAZADO → EVALUADO" },
+    { q:"Estados del trabajo", a:"BORRADOR → (enviar, requiere ≥1 PDF) → PENDIENTE → EN_REVISION → APROBADO | APROBADO_CON_OBSERVACIONES | RECHAZADO → EVALUADO (S4). RECHAZADO y APROBADO_CON_OBSERVACIONES vuelven a PENDIENTE al reenviar. BORRADOR se agregó porque un trabajo lleva varios archivos que se suben uno a uno antes de enviarlo. Transición no permitida → 409; todas quedan en trabajo_historial." },
+    { q:"Permisos sobre un trabajo [S3]", a:"Lo ven sus autores, los docentes asignados al grupo y ADMIN (para el resto no existe: 404). Editar, subir/quitar documentos y enviar: autores, solo en BORRADOR / RECHAZADO / APROBADO_CON_OBSERVACIONES. Revisar, aprobar y rechazar: docentes del grupo. Materia y semestre se derivan del grupo." },
+    { q:"Seguridad de archivos [S3]", a:"Allowlist de extensiones por categoría + tipo real verificado por contenido (Apache Tika, magic bytes): un .exe renombrado a .pdf se rechaza. SVG con scripts se rechaza (XSS). Enlaces solo https y hosts exactos permitidos. Key de MinIO con UUID (nunca el nombre original). Descargas por proxy de work-service verificando permisos en cada descarga; MinIO nunca queda expuesto." },
   ]},
   { cat:"Notificaciones", items:[
     { q:"Canales de notificación", a:"En-app (campana/badge en navbar) + correo SMTP opcional: cada usuario lo activa en su perfil (usuario.notificar_correo, por defecto desactivado) y solo se envía si SMTP_GROUP.ACTIVO. Un fallo de correo nunca rompe la operación que lo originó." },
@@ -117,11 +119,11 @@ const DECISIONS = [
   ]},
   { cat:"Redis — Caché, Rate Limiting y Colas", items:[
     { q:"¿Por qué Redis?", a:"Múltiples estudiantes suben documentos simultáneamente al cierre de semestre. Redis protege MinIO y work-service ante picos de carga sin rechazar peticiones válidas, y además resuelve invalidación de JWT, caché de catálogos y polling eficiente de plagio." },
-    { q:"Rate limiting en uploads", a:"INCR rate:upload:usuario:{id} con TTL 60s. Si supera N requests/minuto → HTTP 429 Too Many Requests. Protege MinIO y work-service en picos de subida masiva sin tocar PostgreSQL." },
+    { q:"Rate limiting en uploads", a:"INCR work:rate:upload:{idUsuario} con ventana de 60 s; máximo WORK_GROUP.UPLOADS_POR_MINUTO (10). Al superarlo → 429 con Retry-After. Si Redis cae → 503 (uploads son fail-closed)." },
     { q:"Blacklist JWT (logout real) [implementado S1]", a:"Logout y rotación de refresh: SET auth:blacklist:{jti} con TTL = vida restante del token. Cambio de contraseña, reset, cambio de rol o desactivación: SET auth:revocado-desde:{idUsuario} (epoch ms, TTL 7 d) que invalida todos los tokens emitidos antes. Un único MGET por request." },
     { q:"Caché de catálogos [implementado S2]", a:"Cache-aside en catalog-service: catalog:cache:{entidad}:todas | catalog:cache:{entidad}:facultad:{id}, TTL 600 s. Un SET índice catalog:cache:{entidad}:indice permite invalidar sin KEYS/SCAN; la invalidación ocurre después del commit. Se cachean facultades, carreras, materias, semestres, fases y tipos de trabajo (no grupos ni listados con inactivos). Si Redis falla en la caché → PostgreSQL (sin 503)." },
     { q:"Estado del análisis de plagio", a:"SET plagio:status:{idTrabajo} 'EN_PROCESO' EX 600. Angular hace polling cada 5s contra Redis (no contra PostgreSQL). Cuando Copyleaks responde: SET plagio:status:{idTrabajo} 'COMPLETADO'. Evita N hits a BD durante el análisis." },
-    { q:"Cola de uploads (buffer ante picos)", a:"En lugar de que N estudiantes golpeen MinIO directamente: LPUSH queue:uploads:{facultad} {payload}. work-service consume con BRPOP procesando de a N en paralelo. Buffer ante subidas simultáneas masivas al cierre de semestre." },
+    { q:"Cola de uploads (DIFERIDA)", a:"Descartada por ahora (decisión 2026-11-17): los archivos (hasta 100 MB) no deben pasar por Redis. Se suben en streaming a MinIO dentro de la petición; protegen ante picos el rate limit por usuario, los límites de tamaño y nginx con request buffering desactivado. Se reevaluará (cola solo de metadatos para post-proceso) si hiciera falta." },
     { q:"Namespaces de keys por microservicio", a:"auth:blacklist:{jti} · auth:revocado-desde:{idUsuario} · auth:rate:login:{ip} · auth:rate:register:{ip} (TTL = LOGIN_WAITING min) · config:dominio:{GRUPO} (600 s) · config:facultad:{idFacultad} (600 s) · notif:pendientes:{idUsuario} (1 día) · auth:2fa:pending:{tokenTemporal} (300 s) · auth:2fa:intentos:{tokenTemporal} (300 s) · catalog:cache:* (600 s) · work:rate:upload:* · work:queue:uploads:* · plagio:status:*. Todas las keys se construyen solo en imp.redis.ClavesRedis y siempre con TTL." },
     { q:"Dependencias Spring Boot", a:"spring-boot-starter-data-redis + spring-boot-starter-cache. Un contenedor Redis más en docker-compose y Kubernetes. Sin cambios arquitecturales a los microservicios existentes." },
   ]},
@@ -140,10 +142,10 @@ const MERMAID_ER = `erDiagram
     GRUPO_DOCENTE { int idGrupo FK; int idUsuario FK; boolean esAdminCurso }
     TIPO_TRABAJO { int idTipoTrabajo PK; varchar nombre; int estado; int idFacultad FK }
     FASE { int idFase PK; varchar nombre; varchar descripcion; int idFacultad FK; int estado }
-    TRABAJO { int idTrabajo PK; varchar titulo; varchar resumen; int estado; int calificacion; varchar observaciones; int idPersona FK; int idMateria FK; int idTipoTrabajo FK; int idGrupo FK; int idSemestre FK }
-    AUTOR { int idAutor PK; int idTrabajo FK }
-    DETALLE_PERSONA_AUTOR { int idPersona FK; int idAutor FK }
-    DOCUMENTO { int idDocumento PK; varchar titulo; varchar tipoArchivo; varchar rutaArchivo; varchar urlExterno; varchar descripcion; int tamanoBytes; int idTrabajo FK; int idFase FK }
+    TRABAJO { int idTrabajo PK; varchar titulo; varchar resumen; varchar estado; int calificacion; varchar observaciones; int idPersonaCreador FK; int idMateria FK; int idTipoTrabajo FK; int idGrupo FK; int idSemestre FK; timestamp fechaCreacion; timestamp fechaActualizacion; timestamp fechaEnvio }
+    TRABAJO_AUTOR { int idTrabajo FK; int idPersona FK }
+    TRABAJO_HISTORIAL { int id PK; int idTrabajo FK; varchar estadoAnterior; varchar estadoNuevo; int idUsuario FK; varchar comentario; timestamp fecha }
+    DOCUMENTO { int idDocumento PK; varchar titulo; varchar descripcion; varchar tipo; varchar categoria; varchar nombreArchivo; varchar extension; varchar contentType; varchar rutaArchivo; varchar urlExterno; bigint tamanoBytes; char sha256; int idTrabajo FK; int idFase FK; timestamp fechaSubida }
     HASHTAG { int idHashtag PK; varchar texto }
     DETALLE_TRABAJO_HASHTAG { int idTrabajo FK; int idHashtag FK }
     RESULTADO_PLAGIO { int id PK; int idTrabajo FK; float porcentajeSimilitud; varchar fuenteComparacion; varchar detalle; timestamp fechaAnalisis }
@@ -170,9 +172,9 @@ const MERMAID_ER = `erDiagram
     SEMESTRE ||--o{ TRABAJO : pertenece
     TIPO_TRABAJO ||--o{ TRABAJO : tipifica
     PERSONA ||--o{ TRABAJO : registra
-    TRABAJO ||--o{ AUTOR : tiene
-    AUTOR ||--o{ DETALLE_PERSONA_AUTOR : integra
-    PERSONA ||--o{ DETALLE_PERSONA_AUTOR : participa
+    TRABAJO ||--o{ TRABAJO_AUTOR : tiene
+    PERSONA ||--o{ TRABAJO_AUTOR : participa
+    TRABAJO ||--o{ TRABAJO_HISTORIAL : registra
     TRABAJO ||--o{ DOCUMENTO : contiene
     FASE ||--o{ DOCUMENTO : clasifica
     TRABAJO ||--o{ DETALLE_TRABAJO_HASHTAG : etiqueta
@@ -193,10 +195,10 @@ const ENTITIES = [
   { name:"GrupoDocente",          color:"#5B21B6", attrs:[["idGrupo","INT FK"],["idUsuario","INT FK"],["esAdminCurso","BOOLEAN"]] },
   { name:"TipoTrabajo",           color:"#065F46", attrs:[["idTipoTrabajo","INT PK"],["nombre","VARCHAR"],["estado","INT"],["idFacultad","INT FK"]] },
   { name:"Fase",                  color:"#065F46", attrs:[["idFase","INT PK"],["nombre","VARCHAR"],["descripcion","VARCHAR"],["idFacultad","INT FK"],["estado","INT"]] },
-  { name:"Trabajo",               color:"#991B1B", attrs:[["idTrabajo","INT PK"],["titulo","VARCHAR"],["resumen","TEXT"],["estado","INT"],["calificacion","INT"],["observaciones","TEXT"],["idPersona","INT FK"],["idMateria","INT FK"],["idTipoTrabajo","INT FK"],["idGrupo","INT FK"],["idSemestre","INT FK"]] },
-  { name:"Autor",                 color:"#991B1B", attrs:[["idAutor","INT PK"],["idTrabajo","INT FK"]] },
-  { name:"DetallePersonaAutor",   color:"#991B1B", attrs:[["idPersona","INT FK"],["idAutor","INT FK"]] },
-  { name:"Documento",             color:"#991B1B", attrs:[["idDocumento","INT PK"],["titulo","VARCHAR"],["tipoArchivo","VARCHAR"],["rutaArchivo","VARCHAR"],["urlExterno","VARCHAR"],["descripcion","VARCHAR"],["tamanoBytes","INT"],["idTrabajo","INT FK"],["idFase","INT FK"]] },
+  { name:"Trabajo",               color:"#991B1B", attrs:[["idTrabajo","INT PK"],["titulo","VARCHAR(200)"],["resumen","VARCHAR(3000)"],["estado","VARCHAR (CHECK)"],["calificacion","INT (S4)"],["observaciones","VARCHAR"],["idPersonaCreador","INT FK"],["idMateria","INT FK"],["idTipoTrabajo","INT FK"],["idGrupo","INT FK"],["idSemestre","INT FK"],["fechaCreacion","TIMESTAMP"],["fechaActualizacion","TIMESTAMP"],["fechaEnvio","TIMESTAMP"]] },
+  { name:"TrabajoAutor",          color:"#991B1B", attrs:[["idTrabajo","INT FK"],["idPersona","INT FK"]] },
+  { name:"TrabajoHistorial",      color:"#991B1B", attrs:[["id","INT PK"],["idTrabajo","INT FK"],["estadoAnterior","VARCHAR"],["estadoNuevo","VARCHAR"],["idUsuario","INT FK"],["comentario","VARCHAR"],["fecha","TIMESTAMP"]] },
+  { name:"Documento",             color:"#991B1B", attrs:[["idDocumento","INT PK"],["titulo","VARCHAR"],["descripcion","VARCHAR"],["tipo","ARCHIVO|ENLACE"],["categoria","VARCHAR"],["nombreArchivo","VARCHAR"],["extension","VARCHAR"],["contentType","VARCHAR"],["rutaArchivo","VARCHAR (key MinIO)"],["urlExterno","VARCHAR"],["tamanoBytes","BIGINT"],["sha256","CHAR(64)"],["idTrabajo","INT FK"],["idFase","INT FK"],["fechaSubida","TIMESTAMP"]] },
   { name:"Hashtag",               color:"#374151", attrs:[["idHashtag","INT PK"],["texto","VARCHAR"]] },
   { name:"DetalleTrabajoHashtag", color:"#374151", attrs:[["idTrabajo","INT FK"],["idHashtag","INT FK"]] },
   { name:"ResultadoPlagio",       color:"#B91C1C", attrs:[["id","INT PK"],["idTrabajo","INT FK"],["porcentajeSimilitud","FLOAT"],["fuenteComparacion","VARCHAR"],["detalle","TEXT"],["fechaAnalisis","TIMESTAMP"]] },
@@ -206,7 +208,8 @@ const ENTITIES = [
 ];
 
 const STATES = [
-  { state:"PENDIENTE",                  color:"#92400E", bg:"#FEF3C7", desc:"Trabajo creado, esperando revisión del docente." },
+  { state:"BORRADOR",                   color:"#475569", bg:"#F1F5F9", desc:"Trabajo creado; el estudiante sube sus documentos antes de enviarlo (agregado en S3)." },
+  { state:"PENDIENTE",                  color:"#92400E", bg:"#FEF3C7", desc:"Enviado (con al menos un PDF), esperando revisión del docente." },
   { state:"EN_REVISION",               color:"#1D4ED8", bg:"#DBEAFE", desc:"Docente está revisando el trabajo." },
   { state:"APROBADO",                  color:"#166534", bg:"#DCFCE7", desc:"Aprobado sin observaciones." },
   { state:"APROBADO_CON_OBSERVACIONES",color:"#065F46", bg:"#D1FAE5", desc:"Aprobado pero el estudiante debe subir versión corregida." },
@@ -288,23 +291,26 @@ const API_GROUPS = [
     { m:"GET",    p:"/api/v1/fases",                            d:"Listar (idFacultad) — POST / PUT / DELETE" },
     { m:"GET",    p:"/api/v1/tipos-trabajo",                    d:"Listar (idFacultad) — POST / PUT / DELETE" },
   ]},
-  { group:"Trabajos", color:"#991B1B", endpoints:[
-    { m:"GET",    p:"/api/v1/trabajos",                  d:"Listar trabajos (filtros: facultad, carrera, materia, semestre, tipo, hashtag, estado)" },
-    { m:"GET",    p:"/api/v1/trabajos/{id}",             d:"Obtener trabajo completo" },
-    { m:"POST",   p:"/api/v1/trabajos",                  d:"Crear trabajo" },
-    { m:"PUT",    p:"/api/v1/trabajos/{id}",             d:"Actualizar trabajo" },
-    { m:"DELETE", p:"/api/v1/trabajos/{id}",             d:"Eliminar trabajo" },
-    { m:"PATCH",  p:"/api/v1/trabajos/{id}/aprobar",     d:"Aprobar trabajo (observaciones opcionales)" },
-    { m:"PATCH",  p:"/api/v1/trabajos/{id}/rechazar",    d:"Rechazar trabajo con motivo" },
-    { m:"PATCH",  p:"/api/v1/trabajos/{id}/calificar",   d:"Calificar (rango desde ConfigFacultad)" },
-    { m:"GET",    p:"/api/v1/trabajos/search",           d:"Búsqueda full-text (PostgreSQL tsvector)" },
-    { m:"GET",    p:"/api/v1/trabajos/public",           d:"Trabajos públicos (anónimo, solo EVALUADOS)" },
+  { group:"Trabajos y Revisión — work-service :8084 (work-api 1.0.0)", color:"#991B1B", endpoints:[
+    { m:"POST",   p:"/api/v1/trabajos",                  d:"Crear trabajo en BORRADOR (ESTUDIANTE; materia y semestre salen del grupo)" },
+    { m:"GET",    p:"/api/v1/trabajos/mios",             d:"Mis trabajos (autor o coautor), paginado" },
+    { m:"GET",    p:"/api/v1/trabajos/revision",         d:"Bandeja del docente (sus grupos; ADMIN todos)" },
+    { m:"GET",    p:"/api/v1/trabajos/{id}",             d:"Detalle con documentos, historial y acciones permitidas" },
+    { m:"PUT",    p:"/api/v1/trabajos/{id}",             d:"Editar (autores, estado editable)" },
+    { m:"DELETE", p:"/api/v1/trabajos/{id}",             d:"Eliminar borrador y sus archivos" },
+    { m:"PATCH",  p:"/api/v1/trabajos/{id}/enviar",      d:"Enviar a revisión (≥1 PDF) → PENDIENTE" },
+    { m:"PATCH",  p:"/api/v1/trabajos/{id}/revisar",     d:"Docente toma la revisión → EN_REVISION" },
+    { m:"PATCH",  p:"/api/v1/trabajos/{id}/aprobar",     d:"Aprobar; con observaciones → APROBADO_CON_OBSERVACIONES" },
+    { m:"PATCH",  p:"/api/v1/trabajos/{id}/rechazar",    d:"Rechazar con motivo obligatorio" },
+    { m:"PATCH",  p:"/api/v1/trabajos/{id}/calificar",   d:"Calificar (Sprint 4)" },
+    { m:"GET",    p:"/api/v1/trabajos/search",           d:"Búsqueda full-text (Sprint 3-4, CU11)" },
   ]},
-  { group:"Documentos", color:"#92400E", endpoints:[
-    { m:"GET",    p:"/api/v1/trabajos/{id}/documentos",  d:"Listar documentos del trabajo" },
-    { m:"POST",   p:"/api/v1/trabajos/{id}/documentos",  d:"Subir documento (multipart/form-data)" },
-    { m:"DELETE", p:"/api/v1/documentos/{id}",           d:"Eliminar documento" },
-    { m:"GET",    p:"/api/v1/documentos/{id}/download",  d:"Descargar (requiere cuenta si acceso externo)" },
+  { group:"Documentos — work-service :8084", color:"#92400E", endpoints:[
+    { m:"POST",   p:"/api/v1/trabajos/{id}/documentos",  d:"Subir archivo (multipart; tipo real + tamaño; 429 por minuto)" },
+    { m:"POST",   p:"/api/v1/trabajos/{id}/enlaces",     d:"Agregar enlace externo (https, hosts permitidos)" },
+    { m:"DELETE", p:"/api/v1/documentos/{id}",           d:"Quitar documento y su archivo" },
+    { m:"GET",    p:"/api/v1/documentos/{id}/descarga",  d:"Descargar por proxy (verifica permisos)" },
+    { m:"GET",    p:"/api/v1/documentos/reglas",         d:"Formatos, tamaños y hosts permitidos de una facultad" },
   ]},
   { group:"Plagio (Copyleaks)", color:"#B91C1C", endpoints:[
     { m:"POST", p:"/api/v1/trabajos/{id}/plagio",        d:"Iniciar análisis de plagio (async Quartz + Copyleaks API)" },
@@ -389,7 +395,7 @@ const USER_STORIES = [
     ]},
 ];
 
-// Estado de tareas: ✅ hecho · 🚧 en curso · ⏳ pendiente
+// Estado de tareas: ✅ hecho · 🚧 en curso · ⏳ pendiente · ➖ descartada/diferida
 const SPRINTS = [
   { num:1, title:"Infraestructura + Auth + 2FA ✅", duration:"3 semanas · cerrado",
     goal:"Sistema base funcional con autenticación JWT, 2FA opcional, estructura multimodulo Gradle configurada y entorno Docker levantado.",
@@ -429,23 +435,23 @@ const SPRINTS = [
       "✅ Quartz job: purga de notificaciones leídas antiguas (reemplaza 'limpieza de tokens JWT', innecesaria por el TTL de Redis)",
       "✅ Pruebas unitarias JUnit 5 + Mockito + tests de contrato: servicios usuario y catálogo",
     ], cu:["CU-REG","CU-IMP","CU-CFG"]},
-  { num:3, title:"Repositorio de Trabajos", duration:"3 semanas",
+  { num:3, title:"Repositorio de Trabajos 🚧", duration:"3 semanas · en curso",
     goal:"Flujo completo de creación → revisión → aprobación con múltiples documentos y todos los formatos permitidos.",
     tasks:[
-      "ws/work-service: Trabajo, Autor, DetallePersonaAutor, Documento, Hashtag, DetalleTrabajoHashtag",
-      "Validación de formatos y tamaño de archivo según ConfigFacultad",
-      "MinIO: almacenamiento de documentos (PDF, DOCX, ZIP, MP4, SVG, etc.)",
-      "Soporte URL externa para videos (YouTube, Vimeo, Drive) y código (GitHub, GitLab)",
-      "Máquina de estados: PENDIENTE → EN_REVISION → APROBADO / APROBADO_CON_OBSERVACIONES / RECHAZADO → EVALUADO",
-      "API REST: /trabajos (CRUD + PATCH aprobar/rechazar/calificar), /documentos",
-      "Módulo Angular Estudiante: crear trabajo, carga múltiple de documentos por fase",
-      "Módulo Angular Docente: bandeja de revisión, aprobar/rechazar/observaciones",
-      "Módulo Angular Repositorio: búsqueda pública (solo EVALUADOS), detalle de trabajo",
-      "Regla visibilidad: trabajos no EVALUADOS ocultos en búsqueda pública",
-      "Rate limiting Redis en uploads: INCR rate:upload:usuario:{id} EX 60 → HTTP 429 si supera límite configurable",
-      "Cola Redis de uploads: LPUSH queue:uploads:{facultad} → work-service consume con BRPOP (buffer ante picos de cierre de semestre)",
-      "Notificaciones al cambiar estado (in-app + correo si habilitado por el usuario)",
-    ], cu:["CU6","CU7","CU8","CU9","CU10","CU11","CU13","CU16"]},
+      "🚧 ws/work-service (:8084): Trabajo, TrabajoAutor, TrabajoHistorial, Documento, Hashtag, TrabajoHashtag (V8, contrato work-api 1.0.0)",
+      "🚧 Validación de formatos (extensión + tipo real con Tika) y tamaño según ConfigFacultad; videos WORK_GROUP.VIDEO_MAX_MB",
+      "🚧 MinIO: almacenamiento en streaming, key con UUID, sha256, compensación si falla la BD",
+      "🚧 Soporte URL externa para videos (YouTube, Vimeo, Drive) y código (GitHub, GitLab), solo https",
+      "🚧 Máquina de estados: BORRADOR → PENDIENTE → EN_REVISION → APROBADO / APROBADO_CON_OBSERVACIONES / RECHAZADO (EVALUADO en S4) + historial",
+      "🚧 API REST: /trabajos (crear, mios, revision, detalle, editar, eliminar, enviar, revisar, aprobar, rechazar), /documentos (subir, enlace, quitar, descarga, reglas)",
+      "🚧 Módulo Angular Estudiante: mis trabajos, crear/editar, carga múltiple de documentos por fase con progreso",
+      "🚧 Módulo Angular Docente: bandeja de revisión, tomar revisión, aprobar/observaciones/rechazar",
+      "⏳ Módulo Angular Repositorio: búsqueda (solo EVALUADOS), detalle público (CU11)",
+      "⏳ Regla visibilidad: trabajos no EVALUADOS ocultos en búsqueda pública",
+      "🚧 Rate limiting Redis en uploads: work:rate:upload:{idUsuario} ventana 60 s, WORK_GROUP.UPLOADS_POR_MINUTO → 429",
+      "➖ Cola Redis de uploads: diferida (los archivos no pasan por Redis; streaming directo a MinIO)",
+      "🚧 Notificaciones al cambiar estado (TRABAJO_ENVIADO a docentes; EN_REVISION / APROBADO / CON_OBSERVACIONES / RECHAZADO a autores)",
+    ], cu:["CU6","CU10","CU11"]},
   { num:4, title:"Búsqueda Full-text + Plagio + Evaluación", duration:"3 semanas",
     goal:"Motor de búsqueda con filtros por facultad, integración Copyleaks async y evaluación con calificación configurable.",
     tasks:[
@@ -627,11 +633,11 @@ function OverviewSection() {
       <Card>
         <h3 style={{ marginTop:0, color:C.primary, fontSize:15 }}>Redis 7 — Casos de Uso en el Sistema</h3>
         {[
-          { key:"Rate Limiting uploads",       ns:"work:rate:upload:{usuarioId}",    desc:"INCR + TTL 60s. HTTP 429 si supera límite. Protege MinIO en picos de cierre de semestre." },
+          { key:"Rate Limiting uploads",       ns:"work:rate:upload:{idUsuario}",    desc:"INCR + TTL 60s. HTTP 429 si supera límite. Protege MinIO en picos de cierre de semestre." },
           { key:"Blacklist JWT ✅",            ns:"auth:blacklist:{jti}",            desc:"SET EX {vida restante}. Logout real y rotación de refresh tokens." },
           { key:"Revocación por usuario ✅",   ns:"auth:revocado-desde:{idUsuario}", desc:"Epoch ms, TTL 7 d. Invalida todos los tokens previos (cambio/reset de contraseña, cambio de rol, desactivación)." },
           { key:"Caché catálogos ✅",          ns:"catalog:cache:{entidad}:todas|facultad:{id}", desc:"TTL 10 min + SET índice para invalidar. Hit → <5ms. Si Redis falla → PostgreSQL." },
-          { key:"Cola de uploads",             ns:"work:queue:uploads:{facultad}",   desc:"LPUSH / BRPOP. Buffer ante subidas masivas simultáneas. N workers en paralelo." },
+          { key:"Cola de uploads ➖",          ns:"(diferida)",                      desc:"No implementada: los archivos van en streaming a MinIO; ver Decisiones." },
           { key:"Estado análisis plagio",      ns:"plagio:status:{idTrabajo}",       desc:"SET EX 600. Angular polling cada 5s sin hit a BD durante el análisis Copyleaks." },
           { key:"Sesión 2FA pendiente ✅",     ns:"auth:2fa:pending:{tokenTemporal}", desc:"SET EX 300 → idUsuario. Token aleatorio (no el id) + auth:2fa:intentos:{tokenTemporal} (máx. 5)." },
         ].map(r=>(
