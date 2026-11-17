@@ -1,0 +1,1155 @@
+openapi: 3.0.3
+info:
+  title: Repositorio Digital UAGRM - work-service
+  version: 1.0.0
+  description: |
+    Trabajos academicos: creacion por el estudiante, documentos por fase (archivos en MinIO o enlaces externos),
+    envio a revision y revision por los docentes del grupo.
+
+    **Contrato fuente de verdad.** El backend lo verifica con tests de contrato
+    (`WorkContratoTest`) y el frontend genera su cliente TypeScript desde este archivo.
+    Todo cambio pasa por aqui primero; los cambios incompatibles requieren subir la version mayor.
+
+    **Ciclo de vida del trabajo**
+    - `BORRADOR` -> (autor envia, requiere al menos un documento PDF) -> `PENDIENTE`
+    - `PENDIENTE` -> (docente del grupo toma la revision) -> `EN_REVISION`
+    - `PENDIENTE` | `EN_REVISION` -> (docente) -> `APROBADO` | `APROBADO_CON_OBSERVACIONES` | `RECHAZADO`
+    - `RECHAZADO` | `APROBADO_CON_OBSERVACIONES` -> (autor corrige y reenvia) -> `PENDIENTE`
+    - `APROBADO` -> `EVALUADO` llega en el Sprint 4 (calificacion).
+    Una transicion no permitida devuelve 409. Cada transicion queda en el historial del trabajo.
+
+    **Quien ve y hace que**
+    - Ver un trabajo: sus autores, los docentes asignados a su grupo y ADMIN. Para cualquier otro usuario el
+      trabajo "no existe" (404, para no revelar ids).
+    - Crear, editar, subir/quitar documentos, enviar y eliminar: solo sus autores (ESTUDIANTE), y solo mientras el
+      trabajo es editable (`BORRADOR`, `RECHAZADO`, `APROBADO_CON_OBSERVACIONES`). Eliminar: solo en `BORRADOR`.
+    - Revisar, aprobar y rechazar: solo los docentes asignados al grupo del trabajo.
+
+    **Archivos**
+    - Formatos por categoria: DOCUMENTO (pdf, docx, odt), PRESENTACION (pptx, pdf), CODIGO (zip, rar, 7z),
+      VIDEO (mp4, webm), IMAGEN (png, jpg, jpeg, svg). Se valida la extension y el tipo real del contenido.
+    - Tamano maximo: el de la facultad (`ConfigFacultad.tamanoMaxArchivoMB`); videos: limite fijo del sistema
+      (por defecto 100 MB). Ver `GET /api/v1/documentos/reglas`.
+    - Enlaces externos (solo https): VIDEO (YouTube, Vimeo, Google Drive) y CODIGO (GitHub, GitLab).
+    - Limite de subidas por usuario (por defecto 10 por minuto): al superarlo, 429 con `Retry-After`.
+    - Las descargas siempre pasan por este servicio, que verifica los permisos en cada descarga.
+
+    Formato de respuestas:
+    - Exito: `{ data, message, status, timestamp }`
+    - Error: `ProblemDetail` (RFC 7807) con `timestamp`; en validaciones incluye `errores` (campo -> mensaje).
+  contact:
+    name: Equipo Repositorio Digital FICCT
+  license:
+    name: Uso academico UAGRM
+    url: https://www.uagrm.edu.bo
+servers:
+  - url: http://localhost:8084
+    description: Desarrollo local
+tags:
+  - name: Trabajos
+    description: Trabajos academicos y su ciclo de vida
+  - name: Revision
+    description: Revision de trabajos por los docentes del grupo
+  - name: Documentos
+    description: Archivos y enlaces de un trabajo
+
+paths:
+  # ---------------------------------------------------------------- Trabajos
+  /api/v1/trabajos:
+    post:
+      tags: [Trabajos]
+      operationId: crearTrabajo
+      summary: Crear trabajo en borrador (ESTUDIANTE)
+      description: |
+        El estudiante autenticado queda como autor. Materia y semestre se toman del grupo (debe estar activo).
+        `registrosCoautores` agrega a otros estudiantes activos como coautores (maximo total de autores:
+        parametro del sistema, por defecto 5). Registro inexistente o que no es estudiante -> 400 en `errores`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrabajoRequest'
+      responses:
+        '201':
+          description: Trabajo creado en BORRADOR
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/mios:
+    get:
+      tags: [Trabajos]
+      operationId: listarMisTrabajos
+      summary: Mis trabajos (ESTUDIANTE, como autor o coautor)
+      description: Ordenados por ultima actualizacion, del mas reciente al mas antiguo.
+      parameters:
+        - $ref: '#/components/parameters/EstadoFiltro'
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina de trabajos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaTrabajos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/revision:
+    get:
+      tags: [Revision]
+      operationId: listarTrabajosRevision
+      summary: Bandeja de revision (DOCENTE de los grupos; ADMIN ve todos)
+      description: |
+        Trabajos de los grupos donde el docente esta asignado. Nunca incluye `BORRADOR`.
+        Sin filtro de estado devuelve `PENDIENTE` y `EN_REVISION` (lo que falta revisar), los mas antiguos primero.
+      parameters:
+        - $ref: '#/components/parameters/EstadoFiltro'
+        - name: idGrupo
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina de trabajos por revisar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaTrabajos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Trabajos]
+      operationId: obtenerTrabajo
+      summary: Detalle del trabajo (autores, docentes del grupo o ADMIN)
+      description: Incluye documentos, historial y las acciones que el usuario autenticado puede hacer ahora.
+      responses:
+        '200':
+          description: Trabajo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    put:
+      tags: [Trabajos]
+      operationId: actualizarTrabajo
+      summary: Editar datos del trabajo (autores, solo si es editable)
+      description: |
+        Reemplaza titulo, resumen, tipo, hashtags y coautores. El grupo solo puede cambiarse en `BORRADOR`
+        (409 en otro estado). El autor autenticado no puede quitarse a si mismo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrabajoRequest'
+      responses:
+        '200':
+          description: Trabajo actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+    delete:
+      tags: [Trabajos]
+      operationId: eliminarTrabajo
+      summary: Eliminar trabajo en BORRADOR (autores)
+      description: Borrado fisico del trabajo y de sus archivos. En otro estado devuelve 409.
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/{id}/enviar:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Trabajos]
+      operationId: enviarTrabajo
+      summary: Enviar a revision (autores)
+      description: |
+        Desde `BORRADOR`, `RECHAZADO` o `APROBADO_CON_OBSERVACIONES` pasa a `PENDIENTE`. Requiere al menos un
+        documento PDF (400). Notifica a los docentes del grupo.
+      responses:
+        '200':
+          description: Trabajo enviado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/{id}/revisar:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Revision]
+      operationId: tomarRevision
+      summary: Tomar el trabajo en revision (docente del grupo)
+      description: De `PENDIENTE` a `EN_REVISION` (avisa a los autores que su trabajo esta siendo revisado).
+      responses:
+        '200':
+          description: Trabajo en revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/{id}/aprobar:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Revision]
+      operationId: aprobarTrabajo
+      summary: Aprobar, con o sin observaciones (docente del grupo)
+      description: |
+        Desde `PENDIENTE` o `EN_REVISION`. Sin `observaciones` (o vacias) -> `APROBADO`; con texto ->
+        `APROBADO_CON_OBSERVACIONES` (el estudiante puede subir una version corregida y reenviar).
+        Notifica a los autores (in-app y por correo si lo tienen activado).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AprobarRequest'
+      responses:
+        '200':
+          description: Trabajo aprobado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/{id}/rechazar:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Revision]
+      operationId: rechazarTrabajo
+      summary: Rechazar con motivo obligatorio (docente del grupo)
+      description: Desde `PENDIENTE` o `EN_REVISION` a `RECHAZADO`. Notifica a los autores.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RechazarRequest'
+      responses:
+        '200':
+          description: Trabajo rechazado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Documentos
+  /api/v1/trabajos/{id}/documentos:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Documentos]
+      operationId: subirDocumento
+      summary: Subir un archivo al trabajo (autores, trabajo editable)
+      description: |
+        Multipart. La fase debe ser activa y de la facultad del trabajo. Se valida extension, tipo real y tamano
+        (400 con el limite vigente). 429 si supera el limite de subidas por minuto. 503 si el almacenamiento no
+        esta disponible.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archivo, titulo, categoria, idFase]
+              properties:
+                archivo:
+                  type: string
+                  format: binary
+                titulo:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                descripcion:
+                  type: string
+                  maxLength: 500
+                categoria:
+                  $ref: '#/components/schemas/CategoriaDocumento'
+                idFase:
+                  type: integer
+                  format: int32
+                  minimum: 1
+      responses:
+        '201':
+          description: Documento subido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDocumento'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '429':
+          $ref: '#/components/responses/LimiteSubidas'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/trabajos/{id}/enlaces:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Documentos]
+      operationId: agregarEnlace
+      summary: Agregar un enlace externo (video o repositorio de codigo)
+      description: Solo `https` y hosts permitidos segun la categoria (400). Mismas reglas de permisos que subir.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnlaceRequest'
+      responses:
+        '201':
+          description: Enlace agregado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaDocumento'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/documentos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    delete:
+      tags: [Documentos]
+      operationId: eliminarDocumento
+      summary: Quitar un documento (autores, trabajo editable)
+      description: Borra el registro y su archivo del almacenamiento. 409 si el trabajo no es editable.
+      responses:
+        '200':
+          $ref: '#/components/responses/SinDatos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/documentos/{id}/descarga:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Documentos]
+      operationId: descargarDocumento
+      summary: Descargar un archivo (quien puede ver el trabajo)
+      description: |
+        Devuelve el archivo con `Content-Disposition: attachment` y su tipo real. Para un enlace externo
+        devuelve 409 (se abre directamente su `urlExterno`).
+      responses:
+        '200':
+          description: Contenido del archivo
+          headers:
+            Content-Disposition:
+              description: attachment; filename="..."
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/documentos/reglas:
+    get:
+      tags: [Documentos]
+      operationId: obtenerReglasDocumentos
+      summary: Formatos, tamanos y hosts permitidos para una facultad
+      description: Cualquier usuario autenticado. El frontend lo usa para validar antes de subir.
+      parameters:
+        - name: idFacultad
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        '200':
+          description: Reglas vigentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaReglasDocumentos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token emitido por auth-service.
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      description: Id del registro.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+    EstadoFiltro:
+      name: estado
+      in: query
+      required: false
+      description: Solo trabajos en este estado.
+      schema:
+        $ref: '#/components/schemas/EstadoTrabajo'
+    Pagina:
+      name: pagina
+      in: query
+      required: false
+      description: Numero de pagina, empieza en 0.
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    Tamano:
+      name: tamano
+      in: query
+      required: false
+      description: Elementos por pagina.
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    SinDatos:
+      description: Operacion realizada (data es null)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RespuestaSinDatos'
+    DatosInvalidos:
+      description: Cuerpo, parametros o archivo invalidos, o regla de negocio incumplida
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 400
+            title: Datos invalidos
+            detail: El archivo supera el tamano maximo de 10 MB de la facultad.
+            instance: /api/v1/trabajos/7/documentos
+            timestamp: '2026-11-17T14:00:00Z'
+            errores:
+              archivo: supera el tamano maximo de 10 MB
+    NoAutenticado:
+      description: Token ausente, invalido, expirado o sesion cerrada
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    AccesoDenegado:
+      description: El rol no permite la accion (p. ej. un docente creando un trabajo) o contrasena pendiente de cambio
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NoEncontrado:
+      description: No existe o el usuario no puede verlo
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 404
+            title: Recurso no encontrado
+            detail: No existe el trabajo 99.
+            instance: /api/v1/trabajos/99
+            timestamp: '2026-11-17T14:00:00Z'
+    Conflicto:
+      description: El estado actual del trabajo no permite la operacion
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+          example:
+            status: 409
+            title: Conflicto
+            detail: No se puede aprobar un trabajo en estado BORRADOR.
+            instance: /api/v1/trabajos/7/aprobar
+            timestamp: '2026-11-17T14:00:00Z'
+    LimiteSubidas:
+      description: Demasiadas subidas en el ultimo minuto; esperar `Retry-After` segundos
+      headers:
+        Retry-After:
+          description: Segundos que faltan para poder subir de nuevo.
+          schema:
+            type: integer
+            format: int32
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    ServicioNoDisponible:
+      description: No se pudo verificar la sesion o el almacenamiento de archivos no responde
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+
+  schemas:
+    # ---------- Enums ----------
+    EstadoTrabajo:
+      type: string
+      enum: [BORRADOR, PENDIENTE, EN_REVISION, APROBADO, APROBADO_CON_OBSERVACIONES, RECHAZADO, EVALUADO]
+    CategoriaDocumento:
+      type: string
+      enum: [DOCUMENTO, PRESENTACION, CODIGO, VIDEO, IMAGEN]
+    TipoDocumento:
+      type: string
+      enum: [ARCHIVO, ENLACE]
+      description: ARCHIVO = guardado en el repositorio; ENLACE = URL externa.
+
+    # ---------- Requests ----------
+    TrabajoRequest:
+      type: object
+      required: [titulo, resumen, idGrupo, idTipoTrabajo]
+      properties:
+        titulo:
+          type: string
+          minLength: 5
+          maxLength: 200
+          example: Sistema de gestion de inventarios con Spring Boot
+        resumen:
+          type: string
+          minLength: 20
+          maxLength: 3000
+          example: El trabajo presenta el analisis, diseno e implementacion de un sistema...
+        idGrupo:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 3
+        idTipoTrabajo:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 1
+        hashtags:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: Sin '#'; se guardan en minusculas.
+          items:
+            type: string
+            minLength: 2
+            maxLength: 50
+            pattern: '^[A-Za-z0-9_\-]+$'
+          example: [springboot, inventarios]
+        registrosCoautores:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: Numeros de registro de otros estudiantes coautores (sin incluir al autor autenticado).
+          items:
+            type: integer
+            format: int32
+            minimum: 1
+          example: [219012346]
+    AprobarRequest:
+      type: object
+      properties:
+        observaciones:
+          type: string
+          nullable: true
+          maxLength: 3000
+          description: Con texto -> APROBADO_CON_OBSERVACIONES; vacio o null -> APROBADO.
+          example: Corregir la bibliografia segun APA 7.
+    RechazarRequest:
+      type: object
+      required: [motivo]
+      properties:
+        motivo:
+          type: string
+          minLength: 10
+          maxLength: 3000
+          example: El trabajo no corresponde al tema asignado al grupo.
+    EnlaceRequest:
+      type: object
+      required: [titulo, url, categoria, idFase]
+      properties:
+        titulo:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: Repositorio del proyecto
+        descripcion:
+          type: string
+          nullable: true
+          maxLength: 500
+        url:
+          type: string
+          format: uri
+          maxLength: 500
+          example: https://github.com/usuario/proyecto
+        categoria:
+          type: string
+          enum: [VIDEO, CODIGO]
+        idFase:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 2
+
+    # ---------- Datos ----------
+    Autor:
+      type: object
+      required: [idPersona, nombre, apellidos, registro]
+      properties:
+        idPersona:
+          type: integer
+          format: int32
+        nombre:
+          type: string
+          example: Juan Carlos
+        apellidos:
+          type: string
+          example: Perez Lopez
+        registro:
+          type: integer
+          format: int32
+          nullable: true
+          example: 219012345
+    Documento:
+      type: object
+      required: [idDocumento, titulo, descripcion, tipo, categoria, idFase, nombreFase, nombreArchivo, extension, tamanoBytes, urlExterno, fechaSubida]
+      properties:
+        idDocumento:
+          type: integer
+          format: int32
+        titulo:
+          type: string
+          example: Documento final
+        descripcion:
+          type: string
+          nullable: true
+        tipo:
+          $ref: '#/components/schemas/TipoDocumento'
+        categoria:
+          $ref: '#/components/schemas/CategoriaDocumento'
+        idFase:
+          type: integer
+          format: int32
+        nombreFase:
+          type: string
+          example: Final
+        nombreArchivo:
+          type: string
+          nullable: true
+          description: Nombre original del archivo (null en enlaces).
+          example: informe-final.pdf
+        extension:
+          type: string
+          nullable: true
+          example: pdf
+        tamanoBytes:
+          type: integer
+          format: int64
+          nullable: true
+          example: 1048576
+        urlExterno:
+          type: string
+          nullable: true
+          description: Solo en enlaces.
+          example: null
+        fechaSubida:
+          type: string
+          format: date-time
+    CambioEstado:
+      type: object
+      required: [estadoAnterior, estadoNuevo, usuario, comentario, fecha]
+      properties:
+        estadoAnterior:
+          type: string
+          nullable: true
+          description: null en la creacion.
+          example: PENDIENTE
+        estadoNuevo:
+          $ref: '#/components/schemas/EstadoTrabajo'
+        usuario:
+          type: string
+          description: Nombre y apellidos de quien hizo el cambio.
+          example: Maria Lopez Suarez
+        comentario:
+          type: string
+          nullable: true
+          description: Observaciones o motivo de rechazo.
+        fecha:
+          type: string
+          format: date-time
+    Acciones:
+      type: object
+      description: Lo que el usuario autenticado puede hacer ahora con este trabajo (el servidor lo vuelve a validar).
+      required: [editar, enviar, eliminar, revisar, aprobar, rechazar]
+      properties:
+        editar:
+          type: boolean
+        enviar:
+          type: boolean
+        eliminar:
+          type: boolean
+        revisar:
+          type: boolean
+        aprobar:
+          type: boolean
+        rechazar:
+          type: boolean
+    TrabajoResumen:
+      type: object
+      required: [idTrabajo, titulo, estado, idGrupo, grupo, idMateria, siglaMateria, nombreMateria, idSemestre, periodo, tipoTrabajo, autores, fechaActualizacion, fechaEnvio]
+      properties:
+        idTrabajo:
+          type: integer
+          format: int32
+        titulo:
+          type: string
+        estado:
+          $ref: '#/components/schemas/EstadoTrabajo'
+        idGrupo:
+          type: integer
+          format: int32
+        grupo:
+          type: string
+          example: SA
+        idMateria:
+          type: integer
+          format: int32
+        siglaMateria:
+          type: string
+          example: INF412
+        nombreMateria:
+          type: string
+          example: Ingenieria de Software I
+        idSemestre:
+          type: integer
+          format: int32
+        periodo:
+          type: string
+          description: Semestre y anio, p. ej. 2-2026.
+          example: 2-2026
+        tipoTrabajo:
+          type: string
+          example: Proyecto de materia
+        autores:
+          type: array
+          items:
+            type: string
+          description: Nombres completos de los autores.
+          example: [Juan Carlos Perez Lopez]
+        fechaActualizacion:
+          type: string
+          format: date-time
+        fechaEnvio:
+          type: string
+          format: date-time
+          nullable: true
+          description: Ultima vez que se envio a revision.
+    Trabajo:
+      type: object
+      required: [idTrabajo, titulo, resumen, estado, observaciones, idGrupo, grupo, idMateria, siglaMateria, nombreMateria, idSemestre, periodo, idFacultad, idTipoTrabajo, tipoTrabajo, autores, hashtags, documentos, historial, acciones, fechaCreacion, fechaActualizacion, fechaEnvio]
+      properties:
+        idTrabajo:
+          type: integer
+          format: int32
+        titulo:
+          type: string
+        resumen:
+          type: string
+        estado:
+          $ref: '#/components/schemas/EstadoTrabajo'
+        observaciones:
+          type: string
+          nullable: true
+          description: Ultimas observaciones o motivo de rechazo del docente.
+        idGrupo:
+          type: integer
+          format: int32
+        grupo:
+          type: string
+        idMateria:
+          type: integer
+          format: int32
+        siglaMateria:
+          type: string
+        nombreMateria:
+          type: string
+        idSemestre:
+          type: integer
+          format: int32
+        periodo:
+          type: string
+        idFacultad:
+          type: integer
+          format: int32
+          description: Facultad de la materia (para consultar las reglas de documentos).
+        idTipoTrabajo:
+          type: integer
+          format: int32
+        tipoTrabajo:
+          type: string
+        autores:
+          type: array
+          items:
+            $ref: '#/components/schemas/Autor'
+        hashtags:
+          type: array
+          items:
+            type: string
+        documentos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Documento'
+        historial:
+          type: array
+          description: Del mas antiguo al mas reciente.
+          items:
+            $ref: '#/components/schemas/CambioEstado'
+        acciones:
+          $ref: '#/components/schemas/Acciones'
+        fechaCreacion:
+          type: string
+          format: date-time
+        fechaActualizacion:
+          type: string
+          format: date-time
+        fechaEnvio:
+          type: string
+          format: date-time
+          nullable: true
+    FormatoCategoria:
+      type: object
+      required: [categoria, extensiones, permiteEnlace, hostsEnlace, tamanoMaxMB]
+      properties:
+        categoria:
+          $ref: '#/components/schemas/CategoriaDocumento'
+        extensiones:
+          type: array
+          items:
+            type: string
+          example: [pdf, docx, odt]
+        permiteEnlace:
+          type: boolean
+        hostsEnlace:
+          type: array
+          items:
+            type: string
+          example: []
+        tamanoMaxMB:
+          type: integer
+          format: int32
+          example: 10
+    ReglasDocumentos:
+      type: object
+      required: [idFacultad, formatos, subidasPorMinuto]
+      properties:
+        idFacultad:
+          type: integer
+          format: int32
+        formatos:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormatoCategoria'
+        subidasPorMinuto:
+          type: integer
+          format: int32
+          example: 10
+    PaginaTrabajos:
+      type: object
+      required: [contenido, pagina, tamano, totalElementos, totalPaginas]
+      properties:
+        contenido:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrabajoResumen'
+        pagina:
+          type: integer
+          format: int32
+        tamano:
+          type: integer
+          format: int32
+        totalElementos:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
+
+    # ---------- Envoltorios ApiResponse<T> ----------
+    RespuestaTrabajo:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Trabajo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaPaginaTrabajos:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/PaginaTrabajos'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaDocumento:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/Documento'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaReglasDocumentos:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/ReglasDocumentos'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaSinDatos:
+      type: object
+      description: Operaciones sin resultado; data siempre es null.
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          type: object
+          nullable: true
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---------- Errores ----------
+    ProblemDetail:
+      type: object
+      required: [status, title, timestamp]
+      properties:
+        type:
+          type: string
+        status:
+          type: integer
+          format: int32
+        title:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        errores:
+          type: object
+          description: Solo en errores de validacion; campo -> mensaje.
+          additionalProperties:
+            type: string
