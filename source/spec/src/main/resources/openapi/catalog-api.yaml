@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - catalog-service
-  version: 1.2.0
+  version: 1.3.0
   description: |
     Catalogos academicos por facultad: facultades, carreras, materias, semestres, grupos (con sus docentes),
     fases y tipos de trabajo.
@@ -11,7 +11,10 @@ info:
     Todo cambio pasa por aqui primero; los cambios incompatibles requieren subir la version mayor.
 
     Reglas generales:
-    - **Lecturas (GET):** cualquier usuario autenticado (ADMIN, DOCENTE, ESTUDIANTE).
+    - **Lecturas (GET):** cualquier usuario autenticado (ADMIN, DOCENTE, ESTUDIANTE). Los listados de
+      facultades, carreras, materias, semestres, grupos, fases y tipos de trabajo tambien se pueden consultar
+      **sin iniciar sesion** (solo lectura; los usa el repositorio publico para sus filtros). Los docentes de un
+      grupo y la configuracion de una facultad siguen exigiendo sesion.
     - **Escrituras (POST, PUT, DELETE):** solo ADMIN.
     - **Sin borrado fisico:** `DELETE` desactiva (`estado = 0`) y devuelve el registro desactivado.
       Para reactivar se envia `estado: 1` en el `PUT`.
@@ -59,6 +62,9 @@ paths:
     get:
       tags: [Facultades]
       operationId: listarFacultades
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar facultades
       parameters:
         - $ref: '#/components/parameters/IncluirInactivos'
@@ -227,6 +233,9 @@ paths:
     get:
       tags: [Carreras]
       operationId: listarCarreras
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar carreras
       parameters:
         - $ref: '#/components/parameters/IdFacultadFiltro'
@@ -336,6 +345,9 @@ paths:
     get:
       tags: [Materias]
       operationId: listarMaterias
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar materias
       parameters:
         - $ref: '#/components/parameters/IdFacultadFiltro'
@@ -445,6 +457,9 @@ paths:
     get:
       tags: [Semestres]
       operationId: listarSemestres
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar semestres
       parameters:
         - $ref: '#/components/parameters/IdFacultadFiltro'
@@ -554,6 +569,9 @@ paths:
     get:
       tags: [Grupos]
       operationId: listarGrupos
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar grupos
       description: Los filtros se combinan (facultad Y materia Y semestre). Este listado no se cachea.
       parameters:
@@ -805,6 +823,9 @@ paths:
     get:
       tags: [Fases]
       operationId: listarFases
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar fases
       parameters:
         - $ref: '#/components/parameters/IdFacultadFiltro'
@@ -914,6 +935,9 @@ paths:
     get:
       tags: [TiposTrabajo]
       operationId: listarTiposTrabajo
+      security:
+        - {}
+        - bearerAuth: []
       summary: Listar tipos de trabajo
       parameters:
         - $ref: '#/components/parameters/IdFacultadFiltro'
