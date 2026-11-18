@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - work-service
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Trabajos academicos: creacion por el estudiante, documentos por fase (archivos en MinIO o enlaces externos),
     envio a revision y revision por los docentes del grupo.
@@ -21,6 +21,10 @@ info:
     **Quien ve y hace que**
     - Ver un trabajo: sus autores, los docentes asignados a su grupo y ADMIN. Para cualquier otro usuario el
       trabajo "no existe" (404, para no revelar ids).
+    - **Repositorio:** los trabajos `EVALUADO` son publicos para cualquier usuario autenticado
+      (`/api/v1/repositorio`): metadatos, autores, hashtags y documentos, sin calificacion, observaciones ni
+      historial. Sus archivos los puede descargar cualquier usuario autenticado. El acceso anonimo (segun
+      `ConfigFacultad.accesoExterno`) y la busqueda full-text llegan en el Sprint 4.
     - Crear, editar, subir/quitar documentos, enviar y eliminar: solo sus autores (ESTUDIANTE), y solo mientras el
       trabajo es editable (`BORRADOR`, `RECHAZADO`, `APROBADO_CON_OBSERVACIONES`). Eliminar: solo en `BORRADOR`.
     - Revisar, aprobar y rechazar: solo los docentes asignados al grupo del trabajo.
@@ -52,6 +56,8 @@ tags:
     description: Revision de trabajos por los docentes del grupo
   - name: Documentos
     description: Archivos y enlaces de un trabajo
+  - name: Repositorio
+    description: Consulta de trabajos evaluados (publicados)
 
 paths:
   # ---------------------------------------------------------------- Trabajos
@@ -483,7 +489,8 @@ paths:
       summary: Descargar un archivo (quien puede ver el trabajo)
       description: |
         Devuelve el archivo con `Content-Disposition: attachment` y su tipo real. Para un enlace externo
-        devuelve 409 (se abre directamente su `urlExterno`).
+        devuelve 409 (se abre directamente su `urlExterno`). Si el trabajo esta `EVALUADO`, cualquier usuario
+        autenticado puede descargarlo.
       responses:
         '200':
           description: Contenido del archivo
@@ -531,6 +538,114 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RespuestaReglasDocumentos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Repositorio
+  /api/v1/repositorio:
+    get:
+      tags: [Repositorio]
+      operationId: buscarRepositorio
+      summary: Buscar trabajos evaluados (cualquier usuario autenticado)
+      description: |
+        Solo trabajos `EVALUADO`. Todos los filtros se combinan (Y). `q` busca, sin distinguir mayusculas ni
+        tildes, en titulo, resumen y hashtags (busqueda simple; la full-text llega en el Sprint 4).
+        Orden: mas recientes primero.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+        - name: hashtag
+          in: query
+          required: false
+          description: Hashtag exacto, sin '#'.
+          schema:
+            type: string
+            maxLength: 50
+        - name: idFacultad
+          in: query
+          required: false
+          description: Facultad de la materia.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idCarrera
+          in: query
+          required: false
+          description: Al menos un autor es de esta carrera.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idMateria
+          in: query
+          required: false
+          description: Materia del trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idSemestre
+          in: query
+          required: false
+          description: Semestre del trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idTipoTrabajo
+          in: query
+          required: false
+          description: Tipo de trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina de resultados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaTrabajos'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/repositorio/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Repositorio]
+      operationId: obtenerTrabajoRepositorio
+      summary: Ficha publica de un trabajo evaluado
+      description: 404 si no existe o no esta `EVALUADO`.
+      responses:
+        '200':
+          description: Ficha del trabajo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajoPublico'
         '400':
           $ref: '#/components/responses/DatosInvalidos'
         '401':
@@ -1001,6 +1116,59 @@ components:
           type: string
           format: date-time
           nullable: true
+    TrabajoPublico:
+      type: object
+      description: Ficha de un trabajo evaluado; sin calificacion, observaciones ni historial.
+      required: [idTrabajo, titulo, resumen, idGrupo, grupo, idMateria, siglaMateria, nombreMateria, idSemestre, periodo, idFacultad, idTipoTrabajo, tipoTrabajo, autores, hashtags, documentos, fechaPublicacion]
+      properties:
+        idTrabajo:
+          type: integer
+          format: int32
+        titulo:
+          type: string
+        resumen:
+          type: string
+        idGrupo:
+          type: integer
+          format: int32
+        grupo:
+          type: string
+        idMateria:
+          type: integer
+          format: int32
+        siglaMateria:
+          type: string
+        nombreMateria:
+          type: string
+        idSemestre:
+          type: integer
+          format: int32
+        periodo:
+          type: string
+        idFacultad:
+          type: integer
+          format: int32
+        idTipoTrabajo:
+          type: integer
+          format: int32
+        tipoTrabajo:
+          type: string
+        autores:
+          type: array
+          items:
+            $ref: '#/components/schemas/Autor'
+        hashtags:
+          type: array
+          items:
+            type: string
+        documentos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Documento'
+        fechaPublicacion:
+          type: string
+          format: date-time
+          description: Fecha en que el trabajo paso a EVALUADO (ultima actualizacion mientras no exista).
     FormatoCategoria:
       type: object
       required: [categoria, extensiones, permiteEnlace, hostsEnlace, tamanoMaxMB]
@@ -1071,6 +1239,20 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/Trabajo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaTrabajoPublico:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/TrabajoPublico'
         message:
           type: string
         status:
