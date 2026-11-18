@@ -26,10 +26,20 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew :auth-service:bootRun         # :8081, admi
 SPRING_PROFILES_ACTIVE=dev ./gradlew :catalog-service:bootRun      # :8082, arrancar DESPUES de auth-service
 SPRING_PROFILES_ACTIVE=dev ./gradlew :user-service:bootRun         # :8083, arrancar DESPUES de auth-service
 SPRING_PROFILES_ACTIVE=dev ./gradlew :work-service:bootRun         # :8084, DESPUES de auth-service; usa MinIO
+SPRING_PROFILES_ACTIVE=dev ./gradlew :plagiarism-service:bootRun   # :8085, DESPUES de auth-service; motor SIMULADO
 ```
 Migraciones: viven en `source/dao` y las aplica SOLO auth-service; los demas servicios no traen Flyway y
-validan el esquema (`ddl-auto: validate`). En docker-compose, catalog-, user- y work-service esperan el
+validan el esquema (`ddl-auto: validate`). En docker-compose, catalog-, user-, work- y plagiarism-service esperan el
 healthcheck de auth-service.
+
+plagiarism-service (CU14, `plagio-api.yaml`): logica en imp `PlagioService` (comun a los motores); en el servicio
+los motores (`MotorPlagio`), Quartz (RAMJobStore: envio, simulacion, timeout cada minuto, reanudacion al arrancar) y
+el webhook. Variables: `PLAGIO_MOTOR` = `SIMULADO` | `COPYLEAKS` (obligatoria fuera de dev; dev = SIMULADO),
+`COPYLEAKS_EMAIL`, `COPYLEAKS_API_KEY`, `COPYLEAKS_SANDBOX`, `COPYLEAKS_REPOSITORIO_ID` (Private Cloud Hub, opcional),
+`PLAGIO_WEBHOOK_BASE_URL` (https), `PLAGIO_WEBHOOK_TOKEN` (>= 32 caracteres; vacio = webhook apagado) y las mismas
+`MINIO_*` que work-service (solo lectura). Con COPYLEAKS las credenciales, la URL y el token son obligatorios (no
+arranca sin ellos). Parametros: `PLAGIO_GROUP` (`TIMEOUT_MINUTOS`, `SIMULADO_SEGUNDOS`, `MAX_FUENTES`). Redis:
+`plagio:status:{idTrabajo}` (TTL 600 s; si falta o Redis cae, /estado lee la BD). Token de Copyleaks solo en memoria.
 
 work-service (trabajos y documentos): MinIO por `MINIO_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`,
 `MINIO_BUCKET` (defaults solo en el perfil dev: `http://localhost:9000`, minioadmin / minioadmin123, `trabajos`;
@@ -54,11 +64,13 @@ Todo cambio de API empieza editando el YAML; después el código.
 - **Frontend:** genera modelos y cliente con `ng-openapi-gen` desde el YAML (nunca escribir interfaces a mano).
 - **Mock:** `docker compose -f docker-compose/dev/docker-compose.yml --profile mock up -d contrato-mock` → Prism en :4010
   (auth); `contrato-mock-catalog` → :4011 (catalog); `contrato-mock-user` → :4012 (user);
-  `contrato-mock-work` → :4013 (work).
+  `contrato-mock-work` → :4013 (work); `contrato-mock-plagio` → :4014 (plagio).
 - **Multipart:** el validador no ve las partes de un request multipart de MockMvc; `UserContratoTest` ignora solo
   `validation.request.body.missing` en `/padron/import` (ruta, seguridad y respuesta si se validan).
   `WorkContratoTest` ademas ignora `validation.request.parameter.query.unexpected` en la subida (el adaptador
   presenta los campos de texto del formulario como query). Descarga binaria: solo status y cabeceras.
+- **Webhook sin sesion** (`security: []`): `PlagioContratoTest` lo valida con el validador estricto, sin header
+  Authorization (el SecurityFilterChain ignora el header en esa ruta).
 - **Control de cambios:** `script/contratos.sh` (Redocly lint + oasdiff contra `origin/main`). Un breaking change
   falla el build salvo que se suba la versión MAYOR de `info.version`. Corre en la etapa `Contratos` de Jenkins.
 - Envoltorios planos por tipo (`RespuestaTokens`, `RespuestaLogin`...): 3.0 no tiene genéricos y `allOf` rompe la

@@ -53,6 +53,20 @@ public final class TextosNotificacion {
     public static final String MENSAJE_TRABAJO_EVALUADO =
             "El trabajo \"%s\" fue calificado y ya esta publicado en el repositorio. Revisa la nota en el detalle.";
 
+    /**
+     * Analisis de plagio terminado (al docente que lo inicio). Lleva el nivel del semaforo, NO el porcentaje
+     * exacto: el aviso puede viajar por correo (un canal que no controlamos) y el porcentaje con sus fuentes se ve
+     * en el detalle, con sesion iniciada. %s = titulo del trabajo, %s = nivel legible.
+     */
+    public static final String TITULO_PLAGIO_COMPLETADO = "Analisis de plagio terminado";
+    public static final String MENSAJE_PLAGIO_COMPLETADO =
+            "El analisis de plagio del trabajo \"%s\" termino con nivel de similitud %s. Revisa el resultado en el "
+                    + "detalle del trabajo.";
+    public static final String TITULO_PLAGIO_ERROR = "Analisis de plagio sin resultado";
+    public static final String MENSAJE_PLAGIO_ERROR =
+            "El analisis de plagio del trabajo \"%s\" no pudo completarse. Puedes iniciarlo de nuevo desde el "
+                    + "detalle del trabajo.";
+
     private TextosNotificacion() {
     }
 }

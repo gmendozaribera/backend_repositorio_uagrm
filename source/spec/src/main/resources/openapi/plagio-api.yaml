@@ -105,7 +105,7 @@ paths:
       operationId: obtenerEstadoAnalisisPlagio
       summary: Estado del analisis en curso (para consultar periodicamente)
       description: |
-        Liviano: se responde desde cache mientras el analisis esta en curso. Cuando `estado` pasa a `COMPLETADO`
+        Liviano: el estado del analisis se responde desde cache (los permisos se verifican siempre). Cuando `estado` pasa a `COMPLETADO`
         o `ERROR`, pedir el resultado completo con `GET /api/v1/plagio/trabajos/{id}`.
         404 si el trabajo nunca se analizo.
       responses:
@@ -165,7 +165,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [completed, error, creditsChecked, indexed]
+          enum: [completed, error, creditsChecked, creditschecked, indexed]
       - name: scanId
         in: path
         required: true
@@ -343,7 +343,7 @@ components:
           type: boolean
         fuentes:
           type: array
-          description: Ordenadas por porcentaje descendente (maximo 20).
+          description: Ordenadas por porcentaje descendente (maximo PLAGIO_GROUP.MAX_FUENTES, por defecto 20).
           items:
             $ref: '#/components/schemas/Fuente'
         documentosAnalizados:

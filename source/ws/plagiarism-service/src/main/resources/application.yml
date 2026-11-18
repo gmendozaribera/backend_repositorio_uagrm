@@ -1,0 +1,106 @@
+# Todos los valores sensibles o dependientes del entorno se sobreescriben con variables
+# de entorno (docker-compose / ConfigMap y Secret de Kubernetes).
+# Para desarrollo local: SPRING_PROFILES_ACTIVE=dev (ver application-dev.yml).
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: plagiarism-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/repositorio}
+    username: ${DB_USERNAME:repositorio}
+    password: ${DB_PASSWORD:repositorio}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # el esquema lo maneja exclusivamente Flyway
+
+  # Las migraciones las aplica SOLO auth-service (este modulo no incluye Flyway).
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      # Tiempos cortos: la verificacion de sesion responde 503 rapido si Redis cae
+      timeout: 2s
+      connect-timeout: 2s
+
+  # Scheduler de los envios, la simulacion y el timeout: en memoria (sin tablas QRTZ_*). Al arrancar se reanudan
+  # los analisis SIMULADO en curso; los de Copyleaks esperan su webhook (o el timeout).
+  quartz:
+    job-store-type: memory
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+app:
+  # Mismos valores que auth-service: este servicio valida los tokens que emite auth-service
+  # (misma clave HS256 y mismo emisor) y cierra sesiones con la misma revocacion de Redis.
+  seguridad:
+    jwt:
+      secreto: ${JWT_SECRET}             # obligatorio: el MISMO secreto que auth-service. Nunca en el repo.
+      emisor: repositorio-uagrm
+      refresh-ttl: 7d
+    dos-factores:
+      emisor: Repositorio UAGRM
+      ttl-pendiente: 300s
+      max-intentos: 5
+    cors-origenes: ${CORS_ORIGENES:http://localhost:4200}
+
+  # Lectura de los archivos de los trabajos: MISMO MinIO y bucket que work-service (aqui solo se leen).
+  almacenamiento:
+    url: ${MINIO_URL}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
+    bucket: ${MINIO_BUCKET:trabajos}
+
+  plagio:
+    # SIMULADO | COPYLEAKS. OBLIGATORIO fuera del perfil dev: el servicio no arranca sin elegirlo a proposito
+    # (asi nunca se usa por error el simulador en produccion).
+    motor: ${PLAGIO_MOTOR}
+    webhook:
+      # URL publica de este servicio vista desde Internet (Copyleaks llama aqui), p. ej. https://api.uagrm.edu.bo
+      base-url: ${PLAGIO_WEBHOOK_BASE_URL:}
+      # Secreto de >= 32 caracteres que va en la URL del webhook (Secret de Kubernetes). Vacio = webhook apagado.
+      token: ${PLAGIO_WEBHOOK_TOKEN:}
+    copyleaks:
+      email: ${COPYLEAKS_EMAIL:}
+      api-key: ${COPYLEAKS_API_KEY:}           # Secret de Kubernetes; nunca en logs
+      sandbox: ${COPYLEAKS_SANDBOX:false}      # true = resultados de prueba sin consumir creditos
+      # Private Cloud Hub de Copyleaks donde se indexan los trabajos (comparacion interna). Vacio = sin comparacion
+      # interna en Copyleaks (solo internet).
+      repositorio-id: ${COPYLEAKS_REPOSITORIO_ID:}
+      login-url: ${COPYLEAKS_LOGIN_URL:https://id.copyleaks.com/v3/account/login/api}
+      api-url: ${COPYLEAKS_API_URL:https://api.copyleaks.com}
+    cache:
+      ttl: ${PLAGIO_CACHE_TTL:600s}            # plagio:status:{idTrabajo}
+
+  # PLAGIO_GROUP y FACULTAD_DEFAULT_GROUP: HASH config:dominio:{GRUPO}
+  dominio:
+    cache:
+      ttl: ${DOMINIO_CACHE_TTL:600s}
+
+  # Umbrales de plagio de cada facultad: JSON config:facultad:{idFacultad}
+  config-facultad:
+    cache:
+      ttl: ${CONFIG_FACULTAD_CACHE_TTL:600s}
+
+  notificaciones:
+    cache:
+      ttl: ${NOTIF_CACHE_TTL:1d}          # contador notif:pendientes:{idUsuario} (se incrementa al notificar)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness y /readiness para Kubernetes

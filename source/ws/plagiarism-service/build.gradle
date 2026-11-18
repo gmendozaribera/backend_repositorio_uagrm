@@ -1,0 +1,36 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+description = 'plagiarism-service :8085 — deteccion de plagio asincrona (motor SIMULADO o Copyleaks)'
+
+dependencies {
+    implementation project(':imp')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Envio al motor, simulacion y timeout en segundo plano (RAMJobStore: sin tablas QRTZ_*; al arrancar se
+    // reanudan los analisis en curso)
+    implementation 'org.springframework.boot:spring-boot-starter-quartz'
+    // Lectura de los archivos de los trabajos (mismo bucket que work-service; aqui solo se leen)
+    implementation "io.minio:minio:${minioVersion}"
+    // Sin Flyway a proposito: las migraciones (source/dao) las aplica solo auth-service.
+    // Este servicio arranca con ddl-auto=validate sobre el esquema ya migrado.
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation project(':mockup')
+    // Tests de contrato: cada request/response se valida contra spec/openapi/plagio-api.yaml
+    testImplementation project(':spec')
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation "com.atlassian.oai:openapi-request-validator-mockmvc:${openapiValidatorVersion}"
+    // Esquema real (V1..V11) contra PostgreSQL: indice unico parcial y mapeo de las entidades (se salta sin Docker)
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-flyway'
+    testImplementation 'org.flywaydb:flyway-database-postgresql'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
+}
+
+// Solo el jar ejecutable (evita el -plain.jar en build/libs)
+tasks.named('jar') {
+    enabled = false
+}

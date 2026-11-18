@@ -20,3 +20,6 @@ project(':user-service').projectDir = file('source/ws/user-service')
 
 include 'work-service'
 project(':work-service').projectDir = file('source/ws/work-service')
+
+include 'plagiarism-service'
+project(':plagiarism-service').projectDir = file('source/ws/plagiarism-service')

@@ -2,6 +2,7 @@ package com.uagrm.repositorio.dao.repository;
 
 import com.uagrm.repositorio.dao.entity.Documento;
 import com.uagrm.repositorio.dao.entity.TipoDocumento;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -21,6 +22,10 @@ public interface DocumentoRepository extends JpaRepository<Documento, Integer> {
 
     /** Enviar a revision exige al menos un archivo con esta extension (pdf). */
     boolean existsByTrabajoIdTrabajoAndTipoAndExtension(Integer idTrabajo, TipoDocumento tipo, String extension);
+
+    /** Archivos del trabajo con alguna de las extensiones dadas (plagio: pdf, docx, odt), en orden de subida. */
+    List<Documento> findByTrabajoIdTrabajoAndTipoAndExtensionInOrderByFechaSubidaAscIdDocumentoAsc(
+            Integer idTrabajo, TipoDocumento tipo, Collection<String> extensiones);
 
     /** Keys de MinIO de los archivos del trabajo (para borrarlos despues de eliminar el trabajo). */
     @Query("select d.rutaArchivo from Documento d where d.trabajo.idTrabajo = :idTrabajo and d.rutaArchivo is not null")

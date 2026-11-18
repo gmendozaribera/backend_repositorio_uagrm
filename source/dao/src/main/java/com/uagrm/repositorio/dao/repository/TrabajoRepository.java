@@ -1,7 +1,11 @@
 package com.uagrm.repositorio.dao.repository;
 
+import com.uagrm.repositorio.dao.entity.EstadoTrabajo;
 import com.uagrm.repositorio.dao.entity.Trabajo;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -32,6 +36,19 @@ public interface TrabajoRepository extends JpaRepository<Trabajo, Integer>, JpaS
     @Override
     @EntityGraph(attributePaths = {"grupo", "materia", "semestre", "tipoTrabajo"})
     Page<Trabajo> findAll(Specification<Trabajo> spec, Pageable pageable);
+
+    /** De los ids dados, los que estan en el estado indicado (plagio: que fuentes internas estan publicadas). */
+    @Query("select t.idTrabajo from Trabajo t where t.idTrabajo in :ids and t.estado = :estado")
+    Set<Integer> findIdsEnEstado(@Param("ids") Collection<Integer> ids, @Param("estado") EstadoTrabajo estado);
+
+    /**
+     * Trabajos de la facultad que no estan en el estado excluido (BORRADOR), salvo uno, por id: candidatos a fuente
+     * interna del motor SIMULADO.
+     */
+    @Query("select t from Trabajo t where t.materia.facultad.idFacultad = :idFacultad and t.estado <> :excluido "
+            + "and t.idTrabajo <> :idTrabajo order by t.idTrabajo")
+    List<Trabajo> findOtrosDeFacultad(@Param("idFacultad") Integer idFacultad, @Param("idTrabajo") Integer idTrabajo,
+                                      @Param("excluido") EstadoTrabajo excluido, Pageable pageable);
 
     /** true si la persona es autora (o coautora) del trabajo. */
     @Query("select count(t) > 0 from Trabajo t join t.autores a where t.idTrabajo = :idTrabajo and a.idPersona = :idPersona")

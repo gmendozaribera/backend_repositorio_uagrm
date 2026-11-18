@@ -144,11 +144,46 @@ services:
       minio:
         condition: service_started
 
+  plagiarism-service:
+    profiles: ["services"]
+    build:
+      context: ../../source/ws/plagiarism-service
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-repositorio}
+      DB_USERNAME: ${POSTGRES_USER:-repositorio}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-repositorio}
+      SPRING_PROFILES_ACTIVE: dev
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}
+      # Lee (solo lee) los archivos del MISMO bucket que work-service
+      MINIO_URL: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-trabajos}
+      # SIMULADO (sin red) o COPYLEAKS. Con COPYLEAKS completar las variables COPYLEAKS_* y PLAGIO_WEBHOOK_* de .env
+      PLAGIO_MOTOR: ${PLAGIO_MOTOR:-SIMULADO}
+      COPYLEAKS_EMAIL: ${COPYLEAKS_EMAIL:-}
+      COPYLEAKS_API_KEY: ${COPYLEAKS_API_KEY:-}
+      COPYLEAKS_SANDBOX: ${COPYLEAKS_SANDBOX:-true}
+      COPYLEAKS_REPOSITORIO_ID: ${COPYLEAKS_REPOSITORIO_ID:-}
+      PLAGIO_WEBHOOK_BASE_URL: ${PLAGIO_WEBHOOK_BASE_URL:-}
+      PLAGIO_WEBHOOK_TOKEN: ${PLAGIO_WEBHOOK_TOKEN:-}
+    ports:
+      - "8085:8085"
+    depends_on:
+      # ddl-auto=validate: necesita el esquema ya migrado por auth-service
+      auth-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
   # Mock del contrato para desarrollo en paralelo: responde segun los ejemplos de auth-api.yaml
   # y rechaza requests que no cumplen el contrato.
   #   docker compose --profile mock up -d contrato-mock   ->  http://localhost:4010/api/v1/auth/login
   #   (catalog-api.yaml: contrato-mock-catalog en :4011; user-api.yaml: contrato-mock-user en :4012;
-  #    work-api.yaml: contrato-mock-work en :4013)
+  #    work-api.yaml: contrato-mock-work en :4013; plagio-api.yaml: contrato-mock-plagio en :4014)
   # Header "Prefer: example=conDosFactores" elige un ejemplo; "Prefer: code=401" fuerza un error.
   contrato-mock:
     profiles: ["mock"]
@@ -188,6 +223,16 @@ services:
       - ../../source/spec/src/main/resources/openapi:/contratos:ro
     ports:
       - "4013:4010"
+
+  # Igual que contrato-mock, para plagio-api.yaml:  http://localhost:4014/api/v1/plagio/trabajos/7/estado
+  contrato-mock-plagio:
+    profiles: ["mock"]
+    image: stoplight/prism:5.12.0
+    command: ["mock", "-h", "0.0.0.0", "/contratos/plagio-api.yaml"]
+    volumes:
+      - ../../source/spec/src/main/resources/openapi:/contratos:ro
+    ports:
+      - "4014:4010"
 
 volumes:
   postgres-data:

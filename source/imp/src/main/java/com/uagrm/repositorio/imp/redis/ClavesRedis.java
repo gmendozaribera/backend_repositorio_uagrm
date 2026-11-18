@@ -11,8 +11,18 @@ public final class ClavesRedis {
     private static final String CONFIG_FACULTAD = "config:facultad:";
     private static final String NOTIF_PENDIENTES = "notif:pendientes:";
     private static final String WORK = "work:";
+    private static final String PLAGIO = "plagio:";
 
     private ClavesRedis() {
+    }
+
+    /**
+     * plagio:status:{idTrabajo} → JSON corto del ULTIMO analisis de plagio del trabajo
+     * ({@code {idAnalisis, estado, porcentaje, nivel}}). TTL: app.plagio.cache.ttl (600 s), renovado en cada cambio
+     * de estado. Lo lee el polling de GET /plagio/trabajos/{id}/estado; si falta o Redis cae se lee la BD.
+     */
+    public static String estadoPlagio(Integer idTrabajo) {
+        return PLAGIO + "status:" + idTrabajo;
     }
 
     /**

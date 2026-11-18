@@ -34,6 +34,8 @@ public final class ConstantesDominio {
     public static final String GRUPO_NOTIF = "NOTIF_GROUP";
     /** Trabajos y documentos (work-service): limite de subidas, tamano de videos, cantidad de autores. */
     public static final String GRUPO_WORK = "WORK_GROUP";
+    /** Deteccion de plagio (plagiarism-service): tiempo maximo, demora del motor simulado, fuentes por analisis. */
+    public static final String GRUPO_PLAGIO = "PLAGIO_GROUP";
 
     // ---------- Nombres: AUTH_GROUP ----------
 
@@ -82,6 +84,15 @@ public final class ConstantesDominio {
     public static final String VIDEO_MAX_MB = "VIDEO_MAX_MB";
     /** Autores de un trabajo como maximo, contando al que lo crea. */
     public static final String MAX_AUTORES = "MAX_AUTORES";
+
+    // ---------- Nombres: PLAGIO_GROUP ----------
+
+    /** Minutos que puede seguir EN_PROCESO un analisis antes de que el job de timeout lo pase a ERROR. */
+    public static final String TIMEOUT_MINUTOS = "TIMEOUT_MINUTOS";
+    /** Segundos que tarda el motor SIMULADO en completar un analisis (solo desarrollo). */
+    public static final String SIMULADO_SEGUNDOS = "SIMULADO_SEGUNDOS";
+    /** Fuentes que se guardan por analisis como maximo (las de mayor porcentaje). */
+    public static final String MAX_FUENTES = "MAX_FUENTES";
 
     /**
      * Largo maximo del texto plano de un secreto: cifrado ocupa ~4/3 * (largo + 28) + 3 caracteres y
@@ -169,7 +180,11 @@ public final class ConstantesDominio {
         WORK_UPLOADS_POR_MINUTO(entero(GRUPO_WORK, UPLOADS_POR_MINUTO, 1, 1000, 10)),
         /** El limite multipart de work-service (101 MB por defecto) tambien acota este valor: ver su application.yml. */
         WORK_VIDEO_MAX_MB(entero(GRUPO_WORK, VIDEO_MAX_MB, 1, 1000, 100)),
-        WORK_MAX_AUTORES(entero(GRUPO_WORK, MAX_AUTORES, 1, 20, 5));
+        WORK_MAX_AUTORES(entero(GRUPO_WORK, MAX_AUTORES, 1, 20, 5)),
+
+        PLAGIO_TIMEOUT_MINUTOS(entero(GRUPO_PLAGIO, TIMEOUT_MINUTOS, 1, 1440, 30)),
+        PLAGIO_SIMULADO_SEGUNDOS(entero(GRUPO_PLAGIO, SIMULADO_SEGUNDOS, 1, 300, 8)),
+        PLAGIO_MAX_FUENTES(entero(GRUPO_PLAGIO, MAX_FUENTES, 1, 100, 20));
 
         private final Definicion def;
 

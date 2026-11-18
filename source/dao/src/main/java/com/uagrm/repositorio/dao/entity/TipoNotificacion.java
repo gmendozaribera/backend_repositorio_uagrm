@@ -28,5 +28,10 @@ public enum TipoNotificacion {
     // ---------- Sprint 4 ----------
 
     /** A los autores: el Administrador de Curso califico el trabajo y quedo publicado (la nota NO va en el aviso). */
-    TRABAJO_EVALUADO
+    TRABAJO_EVALUADO,
+    /**
+     * Al docente que inicio un analisis de plagio cuando termina (COMPLETADO o ERROR). Lleva el nivel del semaforo,
+     * nunca el porcentaje exacto (el aviso puede viajar por correo).
+     */
+    PLAGIO_COMPLETADO
 }
