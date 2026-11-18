@@ -57,7 +57,7 @@ const DECISIONS = [
   ]},
   { cat:"Stack y contratos (decisiones de implementación)", items:[
     { q:"Versión del stack", a:"Java 25 + Spring Boot 4.1.1 (Spring Security 7, Jackson 3, Hibernate 7, Gradle 9 multimodulo) en lugar de Java 17 / Boot 3. Frontend Angular 22 standalone, zoneless, signals, sin librería UI (CSS propio con la paleta del modelo), tests con Vitest." },
-    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.3.0, work-api 1.2.0, plagio-api 1.0.0." },
+    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.3.0, user-api 1.3.0, work-api 1.3.0, plagio-api 1.0.1." },
     { q:"Control de cambios de contrato", a:"script/contratos.sh (etapa 'Contratos' de Jenkins): Redocly lint + oasdiff breaking contra origin/main. Un breaking change falla el build salvo que se suba la versión MAYOR de info.version." },
     { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012, work :4013, plagio :4014." },
     { q:"Puertos de los microservicios", a:"auth-service :8081, catalog-service :8082, user-service :8083 (se intercambiaron user y catalog respecto al modelo original porque catálogos se implementó primero). Nginx/proxy enrutan por prefijo: /api/v1/auth → 8081; /api/v1/usuarios, /tipos-usuario, /padron → 8083; resto → 8082." },
@@ -99,6 +99,7 @@ const DECISIONS = [
   ]},
   { cat:"Detección de plagio", items:[
     { q:"Motor de plagio", a:"Interfaz MotorPlagio intercambiable por variable de entorno: SIMULADO (desarrollo y tests, sin red, resultado determinístico) y COPYLEAKS (producción, API key en Kubernetes Secret, sandbox de Copyleaks para probar). Copyleaks avisa por webhook a /api/v1/plagio/webhook/copyleaks/{token}/... protegido con un token secreto en la URL comparado en tiempo constante." },
+    { q:"Copyleaks sin repositorio privado [S4]", a:"Recomendación: contratar el Private Cloud Hub de Copyleaks (COPYLEAKS_REPOSITORIO_ID) para comparar contra el repositorio interno sin subir trabajos a la base compartida. Mientras no exista, si la facultad tampoco compara con internet el análisis responde 400 al iniciarlo (no gasta créditos). Los archivos se envían a Copyleaks en streaming." },
     { q:"Servicio y rutas de plagio [S4]", a:"plagiarism-service :8085 (plagio-api 1.0.0). Rutas bajo /api/v1/plagio/trabajos/{id} (en vez de /trabajos/{id}/plagio del modelo original) para que nginx enrute todo /api/v1/plagio a un solo servicio. Lo inician y ven los docentes del grupo y ADMIN; los estudiantes no ven resultados. Un análisis en curso por trabajo (409); timeout → ERROR." },
     { q:"Umbral configurable", a:"Por administrador por facultad en ConfigFacultad. Por defecto: 30% = Riesgo Medio (amarillo), >50% = Riesgo Alto (rojo), <30% = OK (verde)." },
     { q:"Fuentes de comparación", a:"Repositorio interno (siempre activo) + internet (activable por administrador por facultad en ConfigFacultad)." },
@@ -109,6 +110,8 @@ const DECISIONS = [
     { q:"Quién califica [S4]", a:"Solo el docente Administrador de Curso (grupo_docente.esAdminCurso) del grupo, desde APROBADO. PATCH /trabajos/{id}/calificar → EVALUADO, visible en el repositorio y notificación TRABAJO_EVALUADO a los autores. La calificación nunca se muestra en el repositorio (solo autores, docentes del grupo y ADMIN)." },
     { q:"Búsqueda full-text [S4]", a:"Columna trabajo.busqueda (tsvector, configuración español + unaccent) con pesos título A, hashtags B, resumen C, índice GIN. websearch_to_tsquery: frases entre comillas y -palabra para excluir; orden por relevancia cuando hay texto." },
     { q:"Acceso anónimo [S4]", a:"/api/v1/publico/** sin token: solo trabajos EVALUADO de facultades con ConfigFacultad.accesoExterno; solo metadatos, descargar exige iniciar sesión. Frontend: /explorar; si ninguna facultad lo habilita, pantalla de acceso restringido." },
+    { q:"Límite de visitantes [S4]", a:"Por IP en /api/v1/publico/**: máximo WORK_GROUP.PUBLICO_PETICIONES_POR_MINUTO (60 por defecto) → 429 con Retry-After. Key work:rate:public:{ip}, ventana 60 s. Si Redis cae se deja pasar (contenido público de solo lectura; el límite protege contra scraping, no cuentas)." },
+    { q:"Catálogos públicos [S4]", a:"Los listados GET de facultades, carreras, materias, semestres, grupos, fases y tipos de trabajo se pueden consultar sin sesión (filtros de /explorar). Docentes de grupo, configuración de facultad y toda escritura siguen exigiendo sesión." },
   ]},
   { cat:"Roles y permisos", items:[
     { q:"Docente Administrador de Curso", a:"Designado por administrador. Puede ser Admin de N cursos simultáneamente. Solo gestiona trabajos y calificaciones dentro de esos grupos. No puede crear/eliminar estudiantes. Se asigna con POST /grupos/{id}/docentes y se cambia con PATCH /grupos/{id}/docentes/{idUsuario} {esAdminCurso}." },
@@ -490,6 +493,7 @@ const SPRINTS = [
       "Swagger UI por microservicio (los contratos OpenAPI ya existen desde S1); cifrado de totpSecret",
       "Seed de datos FICCT para demo: facultad, carreras, materias, usuarios de prueba",
       "Revisión final de criterios de aceptación de todos los CU",
+      "Errores 400 de validación con @PathVariable + @RequestBody (HandlerMethodValidationException) deben incluir el mapa 'errores' (pendiente desde S4)",
     ], cu:[]},
 ];
 
