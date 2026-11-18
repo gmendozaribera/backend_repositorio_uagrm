@@ -9,6 +9,8 @@ apis:
     root: source/spec/src/main/resources/openapi/user-api.yaml
   work:
     root: source/spec/src/main/resources/openapi/work-api.yaml
+  plagio:
+    root: source/spec/src/main/resources/openapi/plagio-api.yaml
 
 extends:
   - recommended
