@@ -1,0 +1,90 @@
+# Todos los valores sensibles o dependientes del entorno se sobreescriben con variables
+# de entorno (docker-compose / ConfigMap y Secret de Kubernetes).
+# Para desarrollo local: SPRING_PROFILES_ACTIVE=dev (ver application-dev.yml).
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  application:
+    name: work-service
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/repositorio}
+    username: ${DB_USERNAME:repositorio}
+    password: ${DB_PASSWORD:repositorio}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # el esquema lo maneja exclusivamente Flyway
+
+  # Las migraciones las aplica SOLO auth-service (este modulo no incluye Flyway).
+
+  # Techo tecnico del multipart: 101 MB por archivo (video de 100 MB + margen). Los limites REALES los aplica el
+  # servicio con mensaje claro: VIDEO -> WORK_GROUP.VIDEO_MAX_MB; resto -> tamanoMaxArchivoMB de la facultad.
+  # Si un admin sube VIDEO_MAX_MB por encima de 100, hay que subir tambien MULTIPART_MAX_FILE.
+  # file-size-threshold 0: las partes se escriben a disco temporal, nunca enteras en memoria.
+  servlet:
+    multipart:
+      max-file-size: ${MULTIPART_MAX_FILE:101MB}
+      max-request-size: ${MULTIPART_MAX_REQUEST:102MB}
+      file-size-threshold: 0
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Tiempos cortos: la verificacion de sesion responde 503 rapido si Redis cae
+      timeout: 2s
+      connect-timeout: 2s
+
+  mvc:
+    problemdetails:
+      enabled: true
+
+app:
+  # Mismos valores que auth-service: este servicio valida los tokens que emite auth-service
+  # (misma clave HS256 y mismo emisor) y cierra sesiones con la misma revocacion de Redis.
+  seguridad:
+    jwt:
+      secreto: ${JWT_SECRET}             # obligatorio: el MISMO secreto que auth-service. Nunca en el repo.
+      emisor: repositorio-uagrm
+      refresh-ttl: 7d
+    dos-factores:
+      emisor: Repositorio UAGRM
+      ttl-pendiente: 300s
+      max-intentos: 5
+    cors-origenes: ${CORS_ORIGENES:http://localhost:4200}
+
+  # Almacenamiento de archivos (MinIO). Credenciales obligatorias fuera de dev (Secret de Kubernetes).
+  # El bucket se crea al arrancar si no existe (si MinIO aun no responde, se reintenta en la primera subida).
+  almacenamiento:
+    url: ${MINIO_URL}
+    access-key: ${MINIO_ACCESS_KEY}
+    secret-key: ${MINIO_SECRET_KEY}
+    bucket: ${MINIO_BUCKET:trabajos}
+
+  # Parametros WORK_GROUP y FACULTAD_DEFAULT_GROUP: HASH config:dominio:{GRUPO}
+  dominio:
+    cache:
+      ttl: ${DOMINIO_CACHE_TTL:600s}
+
+  # tamanoMaxArchivoMB de cada facultad: JSON config:facultad:{idFacultad}
+  config-facultad:
+    cache:
+      ttl: ${CONFIG_FACULTAD_CACHE_TTL:600s}
+
+  notificaciones:
+    cache:
+      ttl: ${NOTIF_CACHE_TTL:1d}          # contador notif:pendientes:{idUsuario} (se incrementa al notificar)
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true   # /actuator/health/liveness y /readiness para Kubernetes

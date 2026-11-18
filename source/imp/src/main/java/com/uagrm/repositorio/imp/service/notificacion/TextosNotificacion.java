@@ -1,7 +1,7 @@
 package com.uagrm.repositorio.imp.service.notificacion;
 
 /**
- * Textos de las notificaciones del Sprint 2 (titulo hasta 150 y mensaje hasta 500 caracteres).
+ * Textos de las notificaciones (titulo hasta 150 y mensaje hasta 500 caracteres).
  * Nunca incluyen contrasenas ni datos que no deban viajar por correo.
  */
 public final class TextosNotificacion {
@@ -21,6 +21,30 @@ public final class TextosNotificacion {
     public static final String MENSAJE_PASSWORD_RESTABLECIDA =
             "El administrador te asigno una contrasena temporal y cerro tus sesiones abiertas. Deberas cambiarla "
                     + "al iniciar sesion. Si no pediste este cambio, avisa a tu facultad.";
+
+    // ---------- Sprint 3: trabajos (el mensaje lleva el titulo del trabajo, hasta 200 caracteres) ----------
+
+    /** Ruta del detalle del trabajo en el frontend. */
+    public static String enlaceTrabajo(Integer idTrabajo) {
+        return "/trabajos/" + idTrabajo;
+    }
+
+    public static final String TITULO_TRABAJO_ENVIADO = "Trabajo enviado a revision";
+    public static final String MENSAJE_TRABAJO_ENVIADO = "El trabajo \"%s\" del grupo %s de %s espera tu revision.";
+
+    public static final String TITULO_TRABAJO_EN_REVISION = "Tu trabajo esta en revision";
+    public static final String MENSAJE_TRABAJO_EN_REVISION = "Un docente comenzo a revisar el trabajo \"%s\".";
+
+    public static final String TITULO_TRABAJO_APROBADO = "Tu trabajo fue aprobado";
+    public static final String MENSAJE_TRABAJO_APROBADO = "El trabajo \"%s\" fue aprobado.";
+
+    public static final String TITULO_TRABAJO_APROBADO_CON_OBSERVACIONES = "Tu trabajo fue aprobado con observaciones";
+    public static final String MENSAJE_TRABAJO_APROBADO_CON_OBSERVACIONES =
+            "El trabajo \"%s\" fue aprobado con observaciones. Revisalas en el detalle, corrige y vuelve a enviarlo.";
+
+    public static final String TITULO_TRABAJO_RECHAZADO = "Tu trabajo fue rechazado";
+    public static final String MENSAJE_TRABAJO_RECHAZADO =
+            "El trabajo \"%s\" fue rechazado. Revisa el motivo en el detalle, corrige y vuelve a enviarlo.";
 
     private TextosNotificacion() {
     }

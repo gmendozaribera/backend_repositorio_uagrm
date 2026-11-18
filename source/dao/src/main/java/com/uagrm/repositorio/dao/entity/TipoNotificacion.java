@@ -10,5 +10,18 @@ public enum TipoNotificacion {
     /** Cuenta nueva (auto-registro del estudiante o alta por el administrador). */
     BIENVENIDA,
     /** El administrador asigno una contrasena temporal. */
-    PASSWORD_RESTABLECIDA
+    PASSWORD_RESTABLECIDA,
+
+    // ---------- Sprint 3: trabajos ----------
+
+    /** A los docentes del grupo: un trabajo llego (o volvio) a su bandeja de revision. */
+    TRABAJO_ENVIADO,
+    /** A los autores: un docente tomo su trabajo en revision. */
+    TRABAJO_EN_REVISION,
+    /** A los autores. */
+    TRABAJO_APROBADO,
+    /** A los autores: aprobado pero con correcciones pedidas (pueden reenviar). */
+    TRABAJO_APROBADO_CON_OBSERVACIONES,
+    /** A los autores, con el motivo en el detalle del trabajo. */
+    TRABAJO_RECHAZADO
 }

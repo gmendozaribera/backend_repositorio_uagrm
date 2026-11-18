@@ -13,8 +13,13 @@ public class LimiteIntentosException extends NegocioException {
     private final long retryAfterSegundos;
 
     public LimiteIntentosException(long retryAfterSegundos) {
-        super(HttpStatus.TOO_MANY_REQUESTS, "Demasiados intentos",
+        this(retryAfterSegundos, "Demasiados intentos",
                 "Demasiados intentos fallidos. Intente de nuevo en " + minutos(retryAfterSegundos) + " minutos.");
+    }
+
+    /** Otros limites (p. ej. subidas por minuto) con su propio titulo y mensaje. */
+    public LimiteIntentosException(long retryAfterSegundos, String title, String detail) {
+        super(HttpStatus.TOO_MANY_REQUESTS, title, detail);
         this.retryAfterSegundos = retryAfterSegundos;
     }
 

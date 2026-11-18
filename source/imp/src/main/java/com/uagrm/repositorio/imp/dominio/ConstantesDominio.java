@@ -32,6 +32,8 @@ public final class ConstantesDominio {
     public static final String GRUPO_SMTP = "SMTP_GROUP";
     /** Notificaciones in-app (campana del frontend). */
     public static final String GRUPO_NOTIF = "NOTIF_GROUP";
+    /** Trabajos y documentos (work-service): limite de subidas, tamano de videos, cantidad de autores. */
+    public static final String GRUPO_WORK = "WORK_GROUP";
 
     // ---------- Nombres: AUTH_GROUP ----------
 
@@ -71,6 +73,15 @@ public final class ConstantesDominio {
     public static final String POLLING_SEGUNDOS = "POLLING_SEGUNDOS";
     /** Dias que se conservan las notificaciones leidas antes de que el job diario las borre. */
     public static final String RETENCION_DIAS = "RETENCION_DIAS";
+
+    // ---------- Nombres: WORK_GROUP ----------
+
+    /** Subidas de archivos permitidas por usuario en una ventana de 60 s (429 al superarlo). */
+    public static final String UPLOADS_POR_MINUTO = "UPLOADS_POR_MINUTO";
+    /** Tamano maximo en MB de los archivos de la categoria VIDEO (el resto usa el de la facultad). */
+    public static final String VIDEO_MAX_MB = "VIDEO_MAX_MB";
+    /** Autores de un trabajo como maximo, contando al que lo crea. */
+    public static final String MAX_AUTORES = "MAX_AUTORES";
 
     /**
      * Largo maximo del texto plano de un secreto: cifrado ocupa ~4/3 * (largo + 28) + 3 caracteres y
@@ -153,7 +164,12 @@ public final class ConstantesDominio {
         SMTP_ACTIVO(booleano(GRUPO_SMTP, ACTIVO, false)),
 
         NOTIF_POLLING_SEGUNDOS(entero(GRUPO_NOTIF, POLLING_SEGUNDOS, 5, 3600, 30)),
-        NOTIF_RETENCION_DIAS(entero(GRUPO_NOTIF, RETENCION_DIAS, 1, 3650, 90));
+        NOTIF_RETENCION_DIAS(entero(GRUPO_NOTIF, RETENCION_DIAS, 1, 3650, 90)),
+
+        WORK_UPLOADS_POR_MINUTO(entero(GRUPO_WORK, UPLOADS_POR_MINUTO, 1, 1000, 10)),
+        /** El limite multipart de work-service (101 MB por defecto) tambien acota este valor: ver su application.yml. */
+        WORK_VIDEO_MAX_MB(entero(GRUPO_WORK, VIDEO_MAX_MB, 1, 1000, 100)),
+        WORK_MAX_AUTORES(entero(GRUPO_WORK, MAX_AUTORES, 1, 20, 5));
 
         private final Definicion def;
 

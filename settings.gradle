@@ -17,3 +17,6 @@ project(':catalog-service').projectDir = file('source/ws/catalog-service')
 
 include 'user-service'
 project(':user-service').projectDir = file('source/ws/user-service')
+
+include 'work-service'
+project(':work-service').projectDir = file('source/ws/work-service')

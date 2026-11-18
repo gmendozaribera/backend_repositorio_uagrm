@@ -1,0 +1,30 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+description = 'work-service :8084 — trabajos academicos, revision y documentos (MinIO)'
+
+dependencies {
+    implementation project(':imp')
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Cliente oficial de MinIO (S3): solo este servicio guarda archivos
+    implementation "io.minio:minio:${minioVersion}"
+    // Sin Flyway a proposito: las migraciones (source/dao) las aplica solo auth-service.
+    // Este servicio arranca con ddl-auto=validate sobre el esquema ya migrado.
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation project(':mockup')
+    // Tests de contrato: cada request/response se valida contra spec/openapi/work-api.yaml
+    testImplementation project(':spec')
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation "com.atlassian.oai:openapi-request-validator-mockmvc:${openapiValidatorVersion}"
+    // Integracion real con MinIO (se salta si no hay Docker)
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-minio'
+}
+
+// Solo el jar ejecutable (evita el -plain.jar en build/libs)
+tasks.named('jar') {
+    enabled = false
+}

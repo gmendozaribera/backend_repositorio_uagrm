@@ -41,7 +41,26 @@ public class NegocioException extends RuntimeException {
 
     /** 400 con el mismo formato que Bean Validation: errores = { campo: mensaje }. */
     public static NegocioException campoInvalido(String campo, String mensaje) {
-        return new NegocioException(HttpStatus.BAD_REQUEST, "Datos invalidos", "Uno o mas campos no son validos.",
-                Map.of(campo, mensaje));
+        return campoInvalido(campo, mensaje, "Uno o mas campos no son validos.");
+    }
+
+    /** Igual que {@link #campoInvalido(String, String)} con un detail propio (p. ej. el limite de tamano vigente). */
+    public static NegocioException campoInvalido(String campo, String mensaje, String detail) {
+        return new NegocioException(HttpStatus.BAD_REQUEST, "Datos invalidos", detail, Map.of(campo, mensaje));
+    }
+
+    /** 400 por una regla de negocio que no corresponde a un campo concreto. */
+    public static NegocioException datosInvalidos(String detail) {
+        return new NegocioException(HttpStatus.BAD_REQUEST, "Datos invalidos", detail);
+    }
+
+    /** 403: el rol o la relacion con el recurso no permiten la accion. */
+    public static NegocioException accesoDenegado(String detail) {
+        return new NegocioException(HttpStatus.FORBIDDEN, "Acceso denegado", detail);
+    }
+
+    /** 503: una dependencia (Redis, almacenamiento de archivos) no responde. */
+    public static NegocioException noDisponible(String detail) {
+        return new NegocioException(HttpStatus.SERVICE_UNAVAILABLE, "Servicio no disponible", detail);
     }
 }

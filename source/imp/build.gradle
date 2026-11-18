@@ -15,6 +15,10 @@ dependencies {
     // CorreoService arma el suyo con los parametros de SMTP_GROUP de la tabla dominio.
     api 'org.springframework.boot:spring-boot-starter-mail'
 
+    // Documentos de trabajos: tipo real del contenido por magic bytes (no se confia en la extension ni en el
+    // Content-Type que manda el navegador). Solo tika-core: liviano y sin dependencias.
+    implementation "org.apache.tika:tika-core:${tikaVersion}"
+
     testImplementation project(':mockup')
     // Servidor SMTP falso en memoria para probar CorreoService
     testImplementation "com.icegreen:greenmail:${greenmailVersion}"

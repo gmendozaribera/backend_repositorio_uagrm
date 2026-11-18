@@ -775,8 +775,12 @@ components:
     # ---------- Datos ----------
     Autor:
       type: object
-      required: [idPersona, nombre, apellidos, registro]
+      required: [idPersona, nombre, apellidos, registro, esUsuarioActual]
       properties:
+        esUsuarioActual:
+          type: boolean
+          description: true si este autor es el usuario autenticado (no debe ir en registrosCoautores).
+          example: true
         idPersona:
           type: integer
           format: int32
@@ -1021,8 +1025,13 @@ components:
           example: 10
     ReglasDocumentos:
       type: object
-      required: [idFacultad, formatos, subidasPorMinuto]
+      required: [idFacultad, formatos, subidasPorMinuto, maxAutores]
       properties:
+        maxAutores:
+          type: integer
+          format: int32
+          description: Maximo de autores por trabajo (incluido el autor), parametro WORK_GROUP.MAX_AUTORES.
+          example: 5
         idFacultad:
           type: integer
           format: int32

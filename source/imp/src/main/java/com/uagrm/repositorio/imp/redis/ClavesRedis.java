@@ -10,6 +10,7 @@ public final class ClavesRedis {
     private static final String DOMINIO = "config:dominio:";
     private static final String CONFIG_FACULTAD = "config:facultad:";
     private static final String NOTIF_PENDIENTES = "notif:pendientes:";
+    private static final String WORK = "work:";
 
     private ClavesRedis() {
     }
@@ -38,6 +39,14 @@ public final class ClavesRedis {
      */
     public static String configFacultad(Integer idFacultad) {
         return CONFIG_FACULTAD + idFacultad;
+    }
+
+    /**
+     * work:rate:upload:{idUsuario} → subidas de archivos del usuario en la ventana actual (exitosas o no).
+     * TTL: 60 s desde la primera subida de la ventana (ventana fija). Maximo: WORK_GROUP.UPLOADS_POR_MINUTO.
+     */
+    public static String limiteSubidas(Integer idUsuario) {
+        return WORK + "rate:upload:" + idUsuario;
     }
 
     /** auth:rate:login:{ip} → intentos de login FALLIDOS desde esa IP. TTL: LOGIN_WAITING minutos desde el primero. */

@@ -51,9 +51,13 @@ class PurgaNotificacionesJobTest {
         assertThat(job.isDurable()).isTrue();
         assertThat(trigger.getJobKey()).isEqualTo(job.getKey());
         ZoneId laPaz = ZoneId.of("America/La_Paz");
-        Date desde = Date.from(ZonedDateTime.of(2026, 11, 16, 10, 0, 0, 0, laPaz).toInstant());
-        Date siguiente = trigger.getFireTimeAfter(desde);
-        assertThat(siguiente.toInstant().atZone(laPaz))
-                .isEqualTo(ZonedDateTime.of(2026, 11, 17, 3, 0, 0, 0, laPaz));
+        // Relativo al inicio del trigger (ahora): una fecha fija deja de funcionar cuando el reloj la pasa
+        ZonedDateTime inicio = trigger.getStartTime().toInstant().atZone(laPaz);
+        ZonedDateTime esperado = inicio.toLocalDate().atTime(3, 0).atZone(laPaz);
+        if (!esperado.isAfter(inicio)) {
+            esperado = esperado.plusDays(1);
+        }
+        Date siguiente = trigger.getFireTimeAfter(Date.from(inicio.toInstant()));
+        assertThat(siguiente.toInstant().atZone(laPaz)).isEqualTo(esperado);
     }
 }
