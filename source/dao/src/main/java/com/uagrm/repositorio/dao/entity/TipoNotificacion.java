@@ -23,5 +23,10 @@ public enum TipoNotificacion {
     /** A los autores: aprobado pero con correcciones pedidas (pueden reenviar). */
     TRABAJO_APROBADO_CON_OBSERVACIONES,
     /** A los autores, con el motivo en el detalle del trabajo. */
-    TRABAJO_RECHAZADO
+    TRABAJO_RECHAZADO,
+
+    // ---------- Sprint 4 ----------
+
+    /** A los autores: el Administrador de Curso califico el trabajo y quedo publicado (la nota NO va en el aviso). */
+    TRABAJO_EVALUADO
 }

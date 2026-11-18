@@ -4,6 +4,7 @@ import com.uagrm.repositorio.dao.entity.EstadoTrabajo;
 import com.uagrm.repositorio.dto.common.ApiResponse;
 import com.uagrm.repositorio.dto.common.PaginaResponse;
 import com.uagrm.repositorio.dto.trabajo.AprobarRequest;
+import com.uagrm.repositorio.dto.trabajo.CalificarRequest;
 import com.uagrm.repositorio.dto.trabajo.RechazarRequest;
 import com.uagrm.repositorio.dto.trabajo.TrabajoRequest;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResponse;
@@ -102,5 +103,11 @@ public class TrabajoController {
     public ApiResponse<TrabajoResponse> rechazar(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Integer id,
                                                  @Valid @RequestBody RechazarRequest request) {
         return ApiResponse.ok("Trabajo rechazado", trabajoService.rechazar(jwt, id, request));
+    }
+
+    @PatchMapping("/{id}/calificar")
+    public ApiResponse<TrabajoResponse> calificar(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Integer id,
+                                                  @Valid @RequestBody CalificarRequest request) {
+        return ApiResponse.ok("Trabajo evaluado", trabajoService.calificar(jwt, id, request));
     }
 }

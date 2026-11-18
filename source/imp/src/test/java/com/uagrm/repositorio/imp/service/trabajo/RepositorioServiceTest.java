@@ -44,13 +44,14 @@ class RepositorioServiceTest {
     private final DocumentoRepository documentoRepository = mock(DocumentoRepository.class);
     private final TrabajoHistorialRepository historialRepository = mock(TrabajoHistorialRepository.class);
     private final UsuarioRepository usuarioRepository = mock(UsuarioRepository.class);
+    private final AccesoExternoService accesoExterno = mock(AccesoExternoService.class);
 
     private RepositorioService service;
 
     @BeforeEach
     void setUp() {
         service = new RepositorioService(trabajoRepository, documentoRepository, historialRepository,
-                new AccesoTrabajos(usuarioRepository, trabajoRepository, mock(GrupoDocenteRepository.class)),
+                new AccesoTrabajos(usuarioRepository, trabajoRepository, mock(GrupoDocenteRepository.class)), accesoExterno,
                 new TrabajoMapperImpl());
         for (Usuario u : new Usuario[]{TrabajoMock.autor(), TrabajoMock.otroEstudiante(), TrabajoMock.docente()}) {
             when(usuarioRepository.findConRolByIdUsuario(u.getIdUsuario())).thenReturn(Optional.of(u));
@@ -123,6 +124,53 @@ class RepositorioServiceTest {
         assertThat(pageable.getValue().getPageSize()).isEqualTo(10);
         assertThat(pageable.getValue().getSort())
                 .containsExactly(Sort.Order.desc("fechaActualizacion"), Sort.Order.desc("idTrabajo"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void conTextoElOrdenLoPoneLaRelevanciaYElPageableVaSinSort() {
+        when(trabajoRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of()));
+        service.buscar(FiltrosRepositorio.texto("redes"), 0, 20);
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(trabajoRepository).findAll(any(Specification.class), pageable.capture());
+        assertThat(pageable.getValue().getSort().isUnsorted()).isTrue();
+    }
+
+    // ---------- Acceso anonimo ----------
+
+    @Test
+    void busquedaPublicaSinFacultadesHabilitadasEs403() {
+        when(accesoExterno.facultadesHabilitadas()).thenReturn(List.of());
+        assertThatThrownBy(() -> service.buscarPublico(FiltrosRepositorio.ninguno(), 0, 20))
+                .isInstanceOf(NegocioException.class)
+                .extracting("status").isEqualTo(HttpStatus.FORBIDDEN);
+        verify(trabajoRepository, org.mockito.Mockito.never()).findAll(any(Specification.class), any(Pageable.class));
+    }
+
+    @Test
+    void fichaPublicaSoloSiLaFacultadTieneAccesoExternoYSinUsuarioActual() {
+        Trabajo trabajo = TrabajoMock.trabajo(EstadoTrabajo.EVALUADO);
+        trabajo.setCalificacion(95);
+        when(trabajoRepository.findDetalleByIdTrabajo(TrabajoMock.ID_TRABAJO)).thenReturn(Optional.of(trabajo));
+        when(historialRepository.findUltimaFechaEstado(any(), any())).thenReturn(Optional.empty());
+
+        when(accesoExterno.habilitada(1)).thenReturn(true);
+        TrabajoPublicoResponse ficha = service.obtenerPublico(TrabajoMock.ID_TRABAJO);
+        assertThat(ficha.autores()).noneMatch(AutorResponse::esUsuarioActual);
+
+        when(accesoExterno.habilitada(1)).thenReturn(false);
+        assertThatThrownBy(() -> service.obtenerPublico(TrabajoMock.ID_TRABAJO))
+                .isInstanceOf(NegocioException.class)
+                .extracting("status").isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void estadoPublico() {
+        when(accesoExterno.facultadesHabilitadas()).thenReturn(List.of(1, 3));
+        assertThat(service.estadoPublico().habilitado()).isTrue();
+        assertThat(service.estadoPublico().facultades()).containsExactly(1, 3);
+        when(accesoExterno.facultadesHabilitadas()).thenReturn(List.of());
+        assertThat(service.estadoPublico().habilitado()).isFalse();
     }
 
     private static Jwt jwt(int idUsuario) {

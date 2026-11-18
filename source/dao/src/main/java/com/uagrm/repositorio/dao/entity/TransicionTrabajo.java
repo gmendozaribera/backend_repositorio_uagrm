@@ -12,7 +12,7 @@ import java.util.Set;
  * BORRADOR | RECHAZADO | APROBADO_CON_OBSERVACIONES --ENVIAR (autor)--> PENDIENTE
  * PENDIENTE --TOMAR_REVISION (docente del grupo)--> EN_REVISION
  * PENDIENTE | EN_REVISION --APROBAR | APROBAR_CON_OBSERVACIONES | RECHAZAR (docente del grupo)--> destino
- * APROBADO --> EVALUADO llega en el Sprint 4.
+ * APROBADO --CALIFICAR (Administrador de Curso del grupo)--> EVALUADO (estado final: publicado en el repositorio)
  * </pre>
  */
 public enum TransicionTrabajo {
@@ -26,12 +26,17 @@ public enum TransicionTrabajo {
     APROBAR_CON_OBSERVACIONES(Actor.DOCENTE_DEL_GRUPO, EstadoTrabajo.APROBADO_CON_OBSERVACIONES,
             EnumSet.of(EstadoTrabajo.PENDIENTE, EstadoTrabajo.EN_REVISION)),
     RECHAZAR(Actor.DOCENTE_DEL_GRUPO, EstadoTrabajo.RECHAZADO,
-            EnumSet.of(EstadoTrabajo.PENDIENTE, EstadoTrabajo.EN_REVISION));
+            EnumSet.of(EstadoTrabajo.PENDIENTE, EstadoTrabajo.EN_REVISION)),
+    /** Sprint 4 (CU18): calificar publica el trabajo en el repositorio. */
+    CALIFICAR(Actor.ADMIN_DE_CURSO, EstadoTrabajo.EVALUADO,
+            EnumSet.of(EstadoTrabajo.APROBADO));
 
     /** Quien puede ejecutar la transicion (ademas de que el trabajo este en un estado de origen). */
     public enum Actor {
         AUTOR,
-        DOCENTE_DEL_GRUPO
+        DOCENTE_DEL_GRUPO,
+        /** Docente del grupo con grupo_docente.es_admin_curso = true. */
+        ADMIN_DE_CURSO
     }
 
     private final Actor actor;

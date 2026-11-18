@@ -22,6 +22,12 @@ public final class ConfigFacultadMock {
         return new ConfigFacultadResponse(idFacultad, true, 20, 25, 60, true, false, 70, horasJwt);
     }
 
+    /** Personalizada con la escala de calificacion y el acceso externo dados (resto igual a los defaults). */
+    public static ConfigFacultadResponse con(Integer idFacultad, int escalaCalifMax, boolean accesoExterno) {
+        return new ConfigFacultadResponse(idFacultad, true, 10, 30, 50, false, accesoExterno, escalaCalifMax,
+                HORAS_POR_DEFECTO);
+    }
+
     public static ConfigFacultadRequest request(int medio, int alto) {
         return new ConfigFacultadRequest(20, medio, alto, true, false, 70, 8);
     }

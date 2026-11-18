@@ -20,7 +20,6 @@ import com.uagrm.repositorio.dao.entity.TipoTrabajo;
 import com.uagrm.repositorio.dao.entity.Trabajo;
 import com.uagrm.repositorio.dao.entity.TrabajoHistorial;
 import com.uagrm.repositorio.dao.entity.Usuario;
-import com.uagrm.repositorio.dao.entity.GrupoDocenteId;
 import com.uagrm.repositorio.dao.repository.DocumentoRepository;
 import com.uagrm.repositorio.dao.repository.GrupoDocenteRepository;
 import com.uagrm.repositorio.dao.repository.GrupoRepository;
@@ -32,15 +31,18 @@ import com.uagrm.repositorio.dao.repository.UsuarioRepository;
 import com.uagrm.repositorio.dto.mapper.TrabajoMapperImpl;
 import com.uagrm.repositorio.dto.trabajo.AccionesResponse;
 import com.uagrm.repositorio.dto.trabajo.AprobarRequest;
+import com.uagrm.repositorio.dto.trabajo.CalificarRequest;
 import com.uagrm.repositorio.dto.trabajo.RechazarRequest;
 import com.uagrm.repositorio.dto.trabajo.TrabajoRequest;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResponse;
 import com.uagrm.repositorio.imp.dominio.ConstantesDominio.Parametro;
 import com.uagrm.repositorio.imp.dominio.ParametrosService;
 import com.uagrm.repositorio.imp.exception.NegocioException;
+import com.uagrm.repositorio.imp.service.catalogo.ConfigFacultadService;
 import com.uagrm.repositorio.imp.service.documento.ArchivosTrabajo;
 import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
 import com.uagrm.repositorio.mockup.CatalogoMock;
+import com.uagrm.repositorio.mockup.ConfigFacultadMock;
 import com.uagrm.repositorio.mockup.TrabajoMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import java.util.List;
@@ -58,6 +60,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 class TrabajoServiceTest {
 
     private static final int ID_DOCENTE_AJENO = 6;
+    /** Docente del grupo 40 con es_admin_curso = true (TrabajoMock.ID_DOCENTE es docente del grupo sin ese rol). */
+    private static final int ID_ADMIN_CURSO = 8;
 
     private final TrabajoRepository trabajoRepository = mock(TrabajoRepository.class);
     private final GrupoRepository grupoRepository = mock(GrupoRepository.class);
@@ -70,6 +74,7 @@ class TrabajoServiceTest {
     private final ArchivosTrabajo archivos = mock(ArchivosTrabajo.class);
     private final ParametrosService parametros = mock(ParametrosService.class);
     private final NotificacionService notificaciones = mock(NotificacionService.class);
+    private final ConfigFacultadService configFacultad = mock(ConfigFacultadService.class);
 
     private TrabajoService service;
     private Trabajo trabajo;
@@ -80,7 +85,7 @@ class TrabajoServiceTest {
         AccesoTrabajos acceso = new AccesoTrabajos(usuarioRepository, trabajoRepository, grupoDocenteRepository);
         service = new TrabajoService(trabajoRepository, grupoRepository, tipoTrabajoRepository, usuarioRepository,
                 hashtagRepository, documentoRepository, historialRepository, grupoDocenteRepository, acceso, archivos,
-                parametros, notificaciones, new TrabajoMapperImpl());
+                parametros, notificaciones, configFacultad, new TrabajoMapperImpl());
 
         coautor = TrabajoMock.coautor();
         usuario(TrabajoMock.autor());
@@ -89,7 +94,11 @@ class TrabajoServiceTest {
         usuario(TrabajoMock.docente());
         usuario(TrabajoMock.admin());
         usuario(UsuarioMock.usuario(ID_DOCENTE_AJENO, "doc.ajeno", "DOCENTE"));
-        when(grupoDocenteRepository.existsById(new GrupoDocenteId(40, TrabajoMock.ID_DOCENTE))).thenReturn(true);
+        usuario(UsuarioMock.usuario(ID_ADMIN_CURSO, "doc.admin", "DOCENTE"));
+        when(grupoDocenteRepository.findEsAdminCurso(40, TrabajoMock.ID_DOCENTE)).thenReturn(Optional.of(false));
+        when(grupoDocenteRepository.findEsAdminCurso(40, ID_ADMIN_CURSO)).thenReturn(Optional.of(true));
+        when(grupoDocenteRepository.findEsAdminCurso(40, ID_DOCENTE_AJENO)).thenReturn(Optional.empty());
+        when(configFacultad.configDe(1)).thenReturn(ConfigFacultadMock.con(1, 100, false));
         when(grupoDocenteRepository.findIdsDocentes(40)).thenReturn(List.of(TrabajoMock.ID_DOCENTE, ID_DOCENTE_AJENO));
         when(parametros.entero(Parametro.WORK_MAX_AUTORES)).thenReturn(5);
         when(documentoRepository.findByTrabajoIdTrabajoOrderByFechaSubidaAscIdDocumentoAsc(anyInt())).thenReturn(List.of());
@@ -102,7 +111,7 @@ class TrabajoServiceTest {
     @Test
     void autorVeSuBorradorConAccionesDeAutor() {
         TrabajoResponse respuesta = service.obtener(jwt(TrabajoMock.ID_AUTOR), TrabajoMock.ID_TRABAJO);
-        assertThat(respuesta.acciones()).isEqualTo(new AccionesResponse(true, true, true, false, false, false));
+        assertThat(respuesta.acciones()).isEqualTo(new AccionesResponse(true, true, true, false, false, false, false));
         assertThat(respuesta.autores()).singleElement().satisfies(a -> assertThat(a.esUsuarioActual()).isTrue());
         assertThat(respuesta.periodo()).isEqualTo("2-2026");
         assertThat(respuesta.idFacultad()).isEqualTo(1);
@@ -122,7 +131,7 @@ class TrabajoServiceTest {
     void docenteDelGrupoVeConAccionesDeRevision() {
         trabajoEn(EstadoTrabajo.PENDIENTE);
         TrabajoResponse respuesta = service.obtener(jwt(TrabajoMock.ID_DOCENTE), TrabajoMock.ID_TRABAJO);
-        assertThat(respuesta.acciones()).isEqualTo(new AccionesResponse(false, false, false, true, true, true));
+        assertThat(respuesta.acciones()).isEqualTo(new AccionesResponse(false, false, false, true, true, true, false));
     }
 
     @Test
@@ -337,6 +346,103 @@ class TrabajoServiceTest {
         assertThat(trabajo.getObservaciones()).isEqualTo("No corresponde al tema asignado.");
         verify(notificaciones).notificar(eq(TrabajoMock.ID_AUTOR), eq(TipoNotificacion.TRABAJO_RECHAZADO), any(), any(),
                 any());
+    }
+
+    // ---------- Calificar (CU18) ----------
+
+    @Test
+    void adminDeCursoCalificaPublicaGuardaHistorialYNotificaALosAutores() {
+        trabajoEn(EstadoTrabajo.APROBADO);
+        trabajo.getAutores().add(coautor.getPersona());
+        when(usuarioRepository.findIdsByPersonas(any())).thenReturn(List.of(TrabajoMock.ID_AUTOR, TrabajoMock.ID_COAUTOR));
+
+        TrabajoResponse respuesta = service.calificar(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO, new CalificarRequest(85));
+
+        assertThat(trabajo.getEstado()).isEqualTo(EstadoTrabajo.EVALUADO);
+        assertThat(trabajo.getCalificacion()).isEqualTo(85);
+        assertThat(respuesta.calificacion()).isEqualTo(85);
+        assertThat(respuesta.escalaCalifMax()).isEqualTo(100);
+        assertThat(respuesta.acciones()).isEqualTo(AccionesResponse.NINGUNA);  // EVALUADO es final
+        TrabajoHistorial historial = historialGuardado();
+        assertThat(historial.getEstadoAnterior()).isEqualTo(EstadoTrabajo.APROBADO);
+        assertThat(historial.getEstadoNuevo()).isEqualTo(EstadoTrabajo.EVALUADO);
+        assertThat(historial.getComentario()).isEqualTo("Calificacion: 85/100");
+        for (int idAutor : new int[]{TrabajoMock.ID_AUTOR, TrabajoMock.ID_COAUTOR}) {
+            verify(notificaciones).notificar(eq(idAutor), eq(TipoNotificacion.TRABAJO_EVALUADO), any(),
+                    org.mockito.ArgumentMatchers.argThat((String m) -> !m.contains("85")), eq("/trabajos/7"));
+        }
+    }
+
+    @Test
+    void calificacionEnLosLimitesDeLaEscalaDeLaFacultad() {
+        when(configFacultad.configDe(1)).thenReturn(ConfigFacultadMock.con(1, 20, false));
+        trabajoEn(EstadoTrabajo.APROBADO);
+        service.calificar(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO, new CalificarRequest(20));
+        assertThat(trabajo.getCalificacion()).isEqualTo(20);
+        trabajoEn(EstadoTrabajo.APROBADO);
+        service.calificar(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO, new CalificarRequest(0));
+        assertThat(trabajo.getCalificacion()).isZero();
+    }
+
+    @Test
+    void fueraDeRangoDevuelve400ConElRangoYNoCambiaNada() {
+        when(configFacultad.configDe(1)).thenReturn(ConfigFacultadMock.con(1, 20, false));
+        trabajoEn(EstadoTrabajo.APROBADO);
+        assertThatThrownBy(() -> service.calificar(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO, new CalificarRequest(21)))
+                .isInstanceOf(NegocioException.class)
+                .satisfies(ex -> {
+                    assertThat(((NegocioException) ex).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(((NegocioException) ex).getErrores()).containsEntry("calificacion", "debe estar entre 0 y 20");
+                });
+        assertStatus(() -> service.calificar(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO, new CalificarRequest(-1)),
+                HttpStatus.BAD_REQUEST);
+        assertThat(trabajo.getEstado()).isEqualTo(EstadoTrabajo.APROBADO);
+        assertThat(trabajo.getCalificacion()).isNull();
+        verifyNoInteractions(notificaciones);
+    }
+
+    @Test
+    void docenteDelGrupoSinSerAdminDeCursoRecibe403YQuienNoLoVe404() {
+        trabajoEn(EstadoTrabajo.APROBADO);
+        assertStatus(() -> service.calificar(jwt(TrabajoMock.ID_DOCENTE), TrabajoMock.ID_TRABAJO, new CalificarRequest(80)),
+                HttpStatus.FORBIDDEN);
+        assertStatus(() -> service.calificar(jwt(TrabajoMock.ID_ADMIN), TrabajoMock.ID_TRABAJO, new CalificarRequest(80)),
+                HttpStatus.FORBIDDEN);
+        assertStatus(() -> service.calificar(jwt(TrabajoMock.ID_AUTOR), TrabajoMock.ID_TRABAJO, new CalificarRequest(80)),
+                HttpStatus.FORBIDDEN);
+        assertStatus(() -> service.calificar(jwt(ID_DOCENTE_AJENO), TrabajoMock.ID_TRABAJO, new CalificarRequest(80)),
+                HttpStatus.NOT_FOUND);
+        assertStatus(() -> service.calificar(jwt(TrabajoMock.ID_OTRO_ESTUDIANTE), TrabajoMock.ID_TRABAJO,
+                new CalificarRequest(80)), HttpStatus.NOT_FOUND);
+        assertThat(trabajo.getEstado()).isEqualTo(EstadoTrabajo.APROBADO);
+    }
+
+    @Test
+    void soloDesdeAprobadoDevuelve409EnOtroEstado() {
+        for (EstadoTrabajo estado : EstadoTrabajo.values()) {
+            if (estado == EstadoTrabajo.APROBADO) {
+                continue;
+            }
+            trabajoEn(estado);
+            assertStatus(() -> service.calificar(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO, new CalificarRequest(80)),
+                    HttpStatus.CONFLICT);
+        }
+    }
+
+    @Test
+    void accionCalificarSoloParaElAdminDeCursoEnAprobadoYCalificacionSoloEnEvaluado() {
+        trabajoEn(EstadoTrabajo.APROBADO);
+        trabajo.setCalificacion(50);  // dato incoherente: fuera de EVALUADO nunca se muestra
+        TrabajoResponse admin = service.obtener(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO);
+        assertThat(admin.acciones()).isEqualTo(new AccionesResponse(false, false, false, false, false, false, true));
+        assertThat(admin.calificacion()).isNull();
+        assertThat(admin.escalaCalifMax()).isEqualTo(100);
+        assertThat(service.obtener(jwt(TrabajoMock.ID_DOCENTE), TrabajoMock.ID_TRABAJO).acciones().calificar()).isFalse();
+
+        trabajoEn(EstadoTrabajo.EVALUADO);
+        trabajo.setCalificacion(90);
+        assertThat(service.obtener(jwt(TrabajoMock.ID_AUTOR), TrabajoMock.ID_TRABAJO).calificacion()).isEqualTo(90);
+        assertThat(service.obtener(jwt(ID_ADMIN_CURSO), TrabajoMock.ID_TRABAJO).acciones().calificar()).isFalse();
     }
 
     @Test

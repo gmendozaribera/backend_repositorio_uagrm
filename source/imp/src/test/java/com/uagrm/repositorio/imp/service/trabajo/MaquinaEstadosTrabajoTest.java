@@ -31,12 +31,15 @@ class MaquinaEstadosTrabajoTest {
                 EstadoTrabajo.APROBADO_CON_OBSERVACIONES, EstadoTrabajo.PENDIENTE, EstadoTrabajo.EN_REVISION);
         assertTransicion(TransicionTrabajo.RECHAZAR, Actor.DOCENTE_DEL_GRUPO, EstadoTrabajo.RECHAZADO,
                 EstadoTrabajo.PENDIENTE, EstadoTrabajo.EN_REVISION);
+        assertTransicion(TransicionTrabajo.CALIFICAR, Actor.ADMIN_DE_CURSO, EstadoTrabajo.EVALUADO,
+                EstadoTrabajo.APROBADO);
     }
 
     @Test
-    void aprobadoYEvaluadoSonFinalesEnElSprint3() {
+    void desdeAprobadoSoloCalificarYEvaluadoEsFinal() {
         for (TransicionTrabajo t : TransicionTrabajo.values()) {
-            assertThat(t.aplicableDesde(EstadoTrabajo.APROBADO)).as(t.name()).isFalse();
+            assertThat(t.aplicableDesde(EstadoTrabajo.APROBADO)).as(t.name())
+                    .isEqualTo(t == TransicionTrabajo.CALIFICAR);
             assertThat(t.aplicableDesde(EstadoTrabajo.EVALUADO)).as(t.name()).isFalse();
         }
     }

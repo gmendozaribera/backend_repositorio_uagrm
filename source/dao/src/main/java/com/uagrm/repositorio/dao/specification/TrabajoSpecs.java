@@ -5,7 +5,7 @@ import com.uagrm.repositorio.dao.entity.GrupoDocente;
 import com.uagrm.repositorio.dao.entity.Hashtag;
 import com.uagrm.repositorio.dao.entity.Persona;
 import com.uagrm.repositorio.dao.entity.Trabajo;
-import jakarta.persistence.criteria.CriteriaBuilder;
+import com.uagrm.repositorio.dao.entity.TrabajoBusqueda;
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Subquery;
@@ -20,9 +20,9 @@ import org.springframework.data.jpa.domain.Specification;
  */
 public final class TrabajoSpecs {
 
-    /** Funcion SQL de V9 (envoltorio IMMUTABLE de unaccent). */
-    private static final String F_UNACCENT = "f_unaccent";
-    private static final char ESCAPE = '\\';
+    /** Funciones SQL de V10: envoltorios de @@ y ts_rank_cd con websearch_to_tsquery('es_unaccent', q). */
+    private static final String F_COINCIDE = "f_busqueda_coincide";
+    private static final String F_RELEVANCIA = "f_busqueda_relevancia";
 
     private TrabajoSpecs() {
     }
@@ -115,41 +115,44 @@ public final class TrabajoSpecs {
         };
     }
 
+    /** Facultad de la materia dentro de la lista (acceso anonimo: solo facultades con acceso externo). */
+    public static Specification<Trabajo> facultadEn(Collection<Integer> idsFacultad) {
+        return (root, query, cb) -> root.get("materia").get("facultad").get("idFacultad").in(idsFacultad);
+    }
+
     /**
-     * Texto libre en titulo, resumen o algun hashtag, sin distinguir mayusculas ni tildes:
-     * {@code f_unaccent(lower(columna)) LIKE f_unaccent(lower('%texto%'))}. La misma normalizacion (la de la BD)
-     * se aplica a ambos lados. Los comodines % y _ que escriba el usuario se escapan: se buscan literalmente.
+     * Busqueda full-text (V10) en titulo, resumen y hashtags con la configuracion es_unaccent (espanol, raices, sin
+     * tildes): {@code f_busqueda_coincide(busqueda, q)} = {@code busqueda @@ websearch_to_tsquery('es_unaccent', q)}.
+     * Admite "frase entre comillas", -excluir y OR. q en blanco = sin filtro.
+     *
+     * <p>Ademas ORDENA la consulta de la pagina por relevancia ({@code ts_rank_cd}: titulo > hashtags > resumen),
+     * luego por fecha de publicacion e id (desempate estable). Para que ese orden se respete el Pageable debe ir
+     * SIN Sort (Spring Data solo reemplaza el orderBy si el Sort no esta vacio). A la consulta de count no se le
+     * agrega orden.</p>
+     *
+     * <p>La columna busqueda se lee con un join por id a {@link TrabajoBusqueda} (misma tabla, solo lectura): asi
+     * {@link Trabajo} no carga el vector en cada consulta. El join es 1 a 1 por clave primaria: no duplica filas.
+     * El texto viaja como parametro enlazado (nunca concatenado en el SQL).</p>
      */
-    public static Specification<Trabajo> texto(String q) {
+    public static Specification<Trabajo> busquedaTexto(String q) {
         return (root, query, cb) -> {
             if (q == null || q.isBlank()) {
                 return cb.conjunction();
             }
-            Expression<String> patron = normalizar(cb, cb.literal("%" + escaparLike(q.strip()) + "%"));
-            Subquery<Integer> sub = query.subquery(Integer.class);
-            var t = sub.correlate(root);
-            Join<Trabajo, Hashtag> h = t.join("hashtags");
-            sub.select(h.get("idHashtag")).where(cb.like(normalizar(cb, h.get("texto")), patron, ESCAPE));
-            return cb.or(
-                    cb.like(normalizar(cb, root.get("titulo")), patron, ESCAPE),
-                    cb.like(normalizar(cb, root.get("resumen")), patron, ESCAPE),
-                    cb.exists(sub));
+            Join<Trabajo, TrabajoBusqueda> b = root.join(TrabajoBusqueda.class);
+            b.on(cb.equal(b.get("idTrabajo"), root.get("idTrabajo")));
+            Expression<String> consulta = cb.literal(q.strip());
+            if (!esConsultaDeConteo(query.getResultType())) {
+                query.orderBy(
+                        cb.desc(cb.function(F_RELEVANCIA, Float.class, b.get("busqueda"), consulta)),
+                        cb.desc(root.get("fechaActualizacion")),
+                        cb.desc(root.get("idTrabajo")));
+            }
+            return cb.isTrue(cb.function(F_COINCIDE, Boolean.class, b.get("busqueda"), consulta));
         };
     }
 
-    private static Expression<String> normalizar(CriteriaBuilder cb, Expression<String> valor) {
-        return cb.function(F_UNACCENT, String.class, cb.lower(valor));
-    }
-
-    /** Escapa el caracter de escape y los comodines de LIKE. */
-    static String escaparLike(String texto) {
-        StringBuilder sb = new StringBuilder(texto.length());
-        for (char c : texto.toCharArray()) {
-            if (c == ESCAPE || c == '%' || c == '_') {
-                sb.append(ESCAPE);
-            }
-            sb.append(c);
-        }
-        return sb.toString();
+    private static boolean esConsultaDeConteo(Class<?> tipoResultado) {
+        return Long.class.equals(tipoResultado) || long.class.equals(tipoResultado);
     }
 }

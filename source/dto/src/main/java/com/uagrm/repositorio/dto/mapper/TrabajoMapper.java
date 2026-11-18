@@ -1,6 +1,7 @@
 package com.uagrm.repositorio.dto.mapper;
 
 import com.uagrm.repositorio.dao.entity.Documento;
+import com.uagrm.repositorio.dao.entity.EstadoTrabajo;
 import com.uagrm.repositorio.dao.entity.Hashtag;
 import com.uagrm.repositorio.dao.entity.Persona;
 import com.uagrm.repositorio.dao.entity.Semestre;
@@ -54,11 +55,19 @@ public interface TrabajoMapper {
     @Mapping(target = "acciones", source = "acciones")
     @Mapping(target = "resumen", source = "trabajo.resumen")
     @Mapping(target = "observaciones", source = "trabajo.observaciones")
+    @Mapping(target = "calificacion", source = "trabajo", qualifiedByName = "calificacion")
+    @Mapping(target = "escalaCalifMax", source = "escalaCalifMax")
     @Mapping(target = "fechaCreacion", source = "trabajo.fechaCreacion")
     @Mapping(target = "fechaActualizacion", source = "trabajo.fechaActualizacion")
     @Mapping(target = "fechaEnvio", source = "trabajo.fechaEnvio")
     TrabajoResponse toResponse(Trabajo trabajo, List<Documento> documentos, List<TrabajoHistorial> historial,
-                               AccionesResponse acciones, @Context Integer idPersonaActual);
+                               AccionesResponse acciones, Integer escalaCalifMax, @Context Integer idPersonaActual);
+
+    /** La calificacion solo se muestra en EVALUADO (defensa extra: en otro estado la columna deberia ser null). */
+    @Named("calificacion")
+    default Integer calificacion(Trabajo trabajo) {
+        return trabajo.getEstado() == EstadoTrabajo.EVALUADO ? trabajo.getCalificacion() : null;
+    }
 
     /** Ficha publica del repositorio: sin calificacion, observaciones, historial ni acciones. */
     @Mapping(target = "idTrabajo", source = "trabajo.idTrabajo")

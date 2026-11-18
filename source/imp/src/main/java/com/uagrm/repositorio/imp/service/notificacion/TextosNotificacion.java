@@ -46,6 +46,13 @@ public final class TextosNotificacion {
     public static final String MENSAJE_TRABAJO_RECHAZADO =
             "El trabajo \"%s\" fue rechazado. Revisa el motivo en el detalle, corrige y vuelve a enviarlo.";
 
+    // ---------- Sprint 4 ----------
+
+    /** Sin la nota: el aviso puede viajar por correo; la calificacion se ve en el detalle, con sesion iniciada. */
+    public static final String TITULO_TRABAJO_EVALUADO = "Tu trabajo fue evaluado";
+    public static final String MENSAJE_TRABAJO_EVALUADO =
+            "El trabajo \"%s\" fue calificado y ya esta publicado en el repositorio. Revisa la nota en el detalle.";
+
     private TextosNotificacion() {
     }
 }

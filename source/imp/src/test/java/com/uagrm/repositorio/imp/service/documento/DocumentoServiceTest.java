@@ -17,7 +17,6 @@ import static org.mockito.Mockito.when;
 import com.uagrm.repositorio.dao.entity.CategoriaDocumento;
 import com.uagrm.repositorio.dao.entity.Documento;
 import com.uagrm.repositorio.dao.entity.EstadoTrabajo;
-import com.uagrm.repositorio.dao.entity.GrupoDocenteId;
 import com.uagrm.repositorio.dao.entity.TipoDocumento;
 import com.uagrm.repositorio.dao.entity.Trabajo;
 import com.uagrm.repositorio.dao.entity.Usuario;
@@ -90,7 +89,7 @@ class DocumentoServiceTest {
         for (Usuario u : new Usuario[]{TrabajoMock.autor(), TrabajoMock.otroEstudiante(), TrabajoMock.docente()}) {
             when(usuarioRepository.findConRolByIdUsuario(u.getIdUsuario())).thenReturn(Optional.of(u));
         }
-        when(grupoDocenteRepository.existsById(new GrupoDocenteId(40, TrabajoMock.ID_DOCENTE))).thenReturn(true);
+        when(grupoDocenteRepository.findEsAdminCurso(40, TrabajoMock.ID_DOCENTE)).thenReturn(Optional.of(false));
         trabajo = TrabajoMock.trabajo(EstadoTrabajo.BORRADOR);
         when(trabajoRepository.findDetalleByIdTrabajo(TrabajoMock.ID_TRABAJO)).thenReturn(Optional.of(trabajo));
         when(trabajoRepository.findParaActualizar(TrabajoMock.ID_TRABAJO)).thenReturn(Optional.of(trabajo));
@@ -193,7 +192,7 @@ class DocumentoServiceTest {
 
         DescargaArchivo descarga = service.descargar(jwt(TrabajoMock.ID_OTRO_ESTUDIANTE), 70);
         assertThat(descarga.contenido()).isSameAs(contenido);
-        verify(grupoDocenteRepository, never()).existsById(any());  // publicado: no hace falta ver la relacion
+        verify(grupoDocenteRepository, never()).findEsAdminCurso(any(), any());  // publicado: no hace falta ver la relacion
     }
 
     @Test

@@ -14,7 +14,7 @@ public enum EstadoTrabajo {
     /** El docente aprobo pero pidio correcciones: el estudiante puede corregir y reenviar. */
     APROBADO_CON_OBSERVACIONES(true),
     RECHAZADO(true),
-    /** Sprint 4 (calificacion). */
+    /** Calificado por el Administrador de Curso: publicado en el repositorio. Estado final. */
     EVALUADO(false);
 
     private final boolean editable;

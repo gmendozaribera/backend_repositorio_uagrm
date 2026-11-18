@@ -130,6 +130,7 @@ public final class TrabajoMock {
         return new TrabajoResponse(ID_TRABAJO, "Sistema de inventarios",
                 "Analisis, diseno e implementacion de un sistema de inventarios.", estado,
                 estado == EstadoTrabajo.RECHAZADO ? "No corresponde al tema asignado." : null,
+                estado == EstadoTrabajo.EVALUADO ? 85 : null, 100,
                 40, "SA", 20, "INF412", "Ingenieria de Software I", 30, "2-2026", 1, 60, "Proyecto de grado",
                 List.of(new AutorResponse(ID_AUTOR, "Juan", "Perez", REGISTRO_AUTOR, true),
                         new AutorResponse(ID_COAUTOR, "Ana", "Rojas", REGISTRO_COAUTOR, false)),

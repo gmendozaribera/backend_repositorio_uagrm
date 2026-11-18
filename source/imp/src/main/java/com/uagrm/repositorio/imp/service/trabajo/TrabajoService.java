@@ -24,6 +24,7 @@ import com.uagrm.repositorio.dao.specification.TrabajoSpecs;
 import com.uagrm.repositorio.dto.common.PaginaResponse;
 import com.uagrm.repositorio.dto.mapper.TrabajoMapper;
 import com.uagrm.repositorio.dto.trabajo.AprobarRequest;
+import com.uagrm.repositorio.dto.trabajo.CalificarRequest;
 import com.uagrm.repositorio.dto.trabajo.RechazarRequest;
 import com.uagrm.repositorio.dto.trabajo.TrabajoRequest;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResponse;
@@ -31,6 +32,7 @@ import com.uagrm.repositorio.dto.trabajo.TrabajoResumenResponse;
 import com.uagrm.repositorio.imp.dominio.ConstantesDominio.Parametro;
 import com.uagrm.repositorio.imp.dominio.ParametrosService;
 import com.uagrm.repositorio.imp.exception.NegocioException;
+import com.uagrm.repositorio.imp.service.catalogo.ConfigFacultadService;
 import com.uagrm.repositorio.imp.service.documento.ArchivosTrabajo;
 import com.uagrm.repositorio.imp.service.documento.ReglasDocumentos;
 import com.uagrm.repositorio.imp.service.notificacion.NotificacionService;
@@ -70,6 +72,7 @@ public class TrabajoService {
     private static final Sort ORDEN_REVISION = Sort.by(Sort.Direction.ASC, "fechaEnvio", "idTrabajo");
     /** Sin filtro de estado, la bandeja muestra lo que falta revisar. */
     private static final Set<EstadoTrabajo> POR_REVISAR = Set.of(EstadoTrabajo.PENDIENTE, EstadoTrabajo.EN_REVISION);
+    private static final String CAMPO_CALIFICACION = "calificacion";
 
     private final TrabajoRepository trabajoRepository;
     private final GrupoRepository grupoRepository;
@@ -83,6 +86,7 @@ public class TrabajoService {
     private final ArchivosTrabajo archivos;
     private final ParametrosService parametros;
     private final NotificacionService notificaciones;
+    private final ConfigFacultadService configFacultad;
     private final TrabajoMapper mapper;
 
     // ---------- Consultas ----------
@@ -248,6 +252,37 @@ public class TrabajoService {
         return detalle(trabajo, actor);
     }
 
+    // ---------- Administrador de Curso ----------
+
+    /**
+     * CU18: califica un trabajo APROBADO y lo publica (EVALUADO). Orden de las verificaciones: 404 si no lo ve,
+     * 403 si no es el Administrador de Curso del grupo, 409 si no esta APROBADO, 400 si la nota esta fuera de
+     * 0..escalaCalifMax de la facultad del trabajo. El historial guarda "Calificacion: N/M" y se avisa a los autores
+     * (sin la nota en el aviso).
+     */
+    @Transactional
+    public TrabajoResponse calificar(Jwt jwt, Integer idTrabajo, CalificarRequest request) {
+        ActorTrabajo actor = acceso.actor(jwt);
+        Trabajo trabajo = acceso.paraModificar(idTrabajo, actor);
+        acceso.exigirAdminCurso(trabajo, actor);
+        exigirTransicion(trabajo, TransicionTrabajo.CALIFICAR);
+        int escala = escalaCalifMax(trabajo);
+        int calificacion = request.calificacion();
+        if (calificacion < 0 || calificacion > escala) {
+            throw NegocioException.campoInvalido(CAMPO_CALIFICACION, "debe estar entre 0 y " + escala);
+        }
+        trabajo.setCalificacion(calificacion);
+        aplicar(trabajo, TransicionTrabajo.CALIFICAR, actor, "Calificacion: " + calificacion + "/" + escala);
+        notificarAutores(trabajo, actor, TipoNotificacion.TRABAJO_EVALUADO,
+                TextosNotificacion.TITULO_TRABAJO_EVALUADO, TextosNotificacion.MENSAJE_TRABAJO_EVALUADO);
+        return detalle(trabajo, actor, escala);
+    }
+
+    /** Escala vigente de la facultad de la materia (ConfigFacultadService: fila propia o defaults, con cache). */
+    private int escalaCalifMax(Trabajo trabajo) {
+        return configFacultad.configDe(trabajo.getMateria().getFacultad().getIdFacultad()).escalaCalifMax();
+    }
+
     // ---------- Maquina de estados ----------
 
     /** 409 si la transicion no se puede aplicar desde el estado actual. */
@@ -273,6 +308,7 @@ public class TrabajoService {
             case TOMAR_REVISION -> "tomar en revision";
             case APROBAR, APROBAR_CON_OBSERVACIONES -> "aprobar";
             case RECHAZAR -> "rechazar";
+            case CALIFICAR -> "calificar";
         };
     }
 
@@ -388,11 +424,15 @@ public class TrabajoService {
     }
 
     private TrabajoResponse detalle(Trabajo trabajo, ActorTrabajo actor) {
+        return detalle(trabajo, actor, escalaCalifMax(trabajo));
+    }
+
+    private TrabajoResponse detalle(Trabajo trabajo, ActorTrabajo actor, int escalaCalifMax) {
         Integer id = trabajo.getIdTrabajo();
         return mapper.toResponse(trabajo,
                 documentoRepository.findByTrabajoIdTrabajoOrderByFechaSubidaAscIdDocumentoAsc(id),
                 historialRepository.findByTrabajoIdTrabajoOrderByFechaAscIdHistorialAsc(id),
-                acceso.acciones(trabajo, acceso.permisos(trabajo, actor)), actor.idPersona());
+                acceso.acciones(trabajo, acceso.permisos(trabajo, actor)), escalaCalifMax, actor.idPersona());
     }
 
     private void notificarAutores(Trabajo trabajo, ActorTrabajo actor, TipoNotificacion tipo, String titulo,

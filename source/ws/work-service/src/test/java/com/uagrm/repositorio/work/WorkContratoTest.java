@@ -29,6 +29,8 @@ import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dto.common.PaginaResponse;
 import com.uagrm.repositorio.dto.trabajo.AccionesResponse;
+import com.uagrm.repositorio.dto.trabajo.CalificarRequest;
+import com.uagrm.repositorio.dto.trabajo.EstadoAccesoPublicoResponse;
 import com.uagrm.repositorio.dto.trabajo.FiltrosRepositorio;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
 import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
@@ -44,6 +46,7 @@ import com.uagrm.repositorio.mockup.TrabajoMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
 import com.uagrm.repositorio.work.config.SecurityConfig;
 import com.uagrm.repositorio.work.controller.DocumentoController;
+import com.uagrm.repositorio.work.controller.PublicoController;
 import com.uagrm.repositorio.work.controller.RepositorioController;
 import com.uagrm.repositorio.work.controller.TrabajoController;
 import java.io.ByteArrayInputStream;
@@ -75,7 +78,8 @@ import org.springframework.test.web.servlet.request.AbstractMockHttpServletReque
  * application/octet-stream y la respuesta real lleva el tipo del archivo, asi que se verifican status y cabeceras
  * (Content-Disposition, Content-Type, nosniff) sin el validador.</p>
  */
-@WebMvcTest(controllers = {TrabajoController.class, DocumentoController.class, RepositorioController.class})
+@WebMvcTest(controllers = {TrabajoController.class, DocumentoController.class, RepositorioController.class,
+        PublicoController.class})
 @Import({SecurityConfig.class, SeguridadConfig.class, SeguridadErrorHandler.class, JwtService.class})
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
@@ -139,7 +143,7 @@ class WorkContratoTest {
     @Test
     void crearTrabajo() throws Exception {
         when(trabajoService.crear(any(), any())).thenReturn(
-                TrabajoMock.trabajoResponse(EstadoTrabajo.BORRADOR, new AccionesResponse(true, true, true, false, false, false)));
+                TrabajoMock.trabajoResponse(EstadoTrabajo.BORRADOR, new AccionesResponse(true, true, true, false, false, false, false)));
         llamar(post("/api/v1/trabajos"), estudiante(), TRABAJO)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.autores[0].esUsuarioActual").value(true))
@@ -237,7 +241,7 @@ class WorkContratoTest {
     @Test
     void tomarRevisionAprobarYRechazar() throws Exception {
         when(trabajoService.tomarRevision(any(), eq(7))).thenReturn(
-                TrabajoMock.trabajoResponse(EstadoTrabajo.EN_REVISION, new AccionesResponse(false, false, false, false, true, true)));
+                TrabajoMock.trabajoResponse(EstadoTrabajo.EN_REVISION, new AccionesResponse(false, false, false, false, true, true, false)));
         llamar(patch("/api/v1/trabajos/7/revisar"), docente(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
 
         when(trabajoService.aprobar(any(), eq(7), any())).thenReturn(
@@ -264,6 +268,68 @@ class WorkContratoTest {
                 .andExpect(status().isForbidden()).andExpect(cumpleContrato());
         when(trabajoService.aprobar(any(), eq(9), any())).thenThrow(NegocioException.noEncontrado("No existe el trabajo 9."));
         llamar(patch("/api/v1/trabajos/9/aprobar"), docente(), "{}").andExpect(status().isNotFound()).andExpect(cumpleContrato());
+    }
+
+    // ---------- Calificar (CU18) ----------
+
+    @Test
+    void calificarComoAdministradorDeCurso() throws Exception {
+        when(trabajoService.calificar(any(), eq(7), any())).thenReturn(
+                TrabajoMock.trabajoResponse(EstadoTrabajo.EVALUADO, AccionesResponse.NINGUNA));
+        llamar(patch("/api/v1/trabajos/7/calificar"), docente(), "{\"calificacion\":85}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.estado").value("EVALUADO"))
+                .andExpect(jsonPath("$.data.calificacion").value(85))
+                .andExpect(jsonPath("$.data.escalaCalifMax").value(100))
+                .andExpect(jsonPath("$.data.acciones.calificar").value(false))
+                .andExpect(cumpleContrato());
+        verify(trabajoService).calificar(any(), eq(7), eq(new CalificarRequest(85)));
+    }
+
+    @Test
+    void detalleNoEvaluadoConCalificacionNullYAccionCalificar() throws Exception {
+        when(trabajoService.obtener(any(), eq(7))).thenReturn(TrabajoMock.trabajoResponse(EstadoTrabajo.APROBADO,
+                new AccionesResponse(false, false, false, false, false, false, true)));
+        llamar(get("/api/v1/trabajos/7"), docente(), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.calificacion").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.acciones.calificar").value(true))
+                .andExpect(cumpleContrato());
+    }
+
+    @Test
+    void calificarErrores() throws Exception {
+        // Bean Validation: falta o negativa
+        llamar(patch("/api/v1/trabajos/7/calificar"), docente(), "{\"calificacion\":-1}")
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(patch("/api/v1/trabajos/7/calificar"), docente(), "{}")
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        // Rango de la facultad (service)
+        when(trabajoService.calificar(any(), eq(7), any())).thenThrow(
+                NegocioException.campoInvalido("calificacion", "debe estar entre 0 y 100"));
+        llamar(patch("/api/v1/trabajos/7/calificar"), docente(), "{\"calificacion\":101}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores.calificacion").value("debe estar entre 0 y 100"))
+                .andExpect(cumpleContrato());
+        // Docente del grupo que no es Administrador de Curso
+        when(trabajoService.calificar(any(), eq(8), any())).thenThrow(NegocioException.accesoDenegado(
+                "Solo el Administrador de Curso del grupo puede calificar el trabajo."));
+        llamar(patch("/api/v1/trabajos/8/calificar"), docente(), "{\"calificacion\":80}")
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        when(trabajoService.calificar(any(), eq(9), any())).thenThrow(NegocioException.noEncontrado("No existe el trabajo 9."));
+        llamar(patch("/api/v1/trabajos/9/calificar"), docente(), "{\"calificacion\":80}")
+                .andExpect(status().isNotFound()).andExpect(cumpleContrato());
+        when(trabajoService.calificar(any(), eq(10), any())).thenThrow(
+                NegocioException.conflicto("No se puede calificar un trabajo en estado PENDIENTE."));
+        llamar(patch("/api/v1/trabajos/10/calificar"), docente(), "{\"calificacion\":80}")
+                .andExpect(status().isConflict()).andExpect(cumpleContrato());
+        // Por rol: estudiante y admin no llegan al service
+        llamar(patch("/api/v1/trabajos/7/calificar"), estudiante(), "{\"calificacion\":80}")
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(patch("/api/v1/trabajos/7/calificar"), admin(), "{\"calificacion\":80}")
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(patch("/api/v1/trabajos/7/calificar"), null, "{\"calificacion\":80}")
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContrato());
     }
 
     // ---------- Documentos ----------
@@ -374,10 +440,11 @@ class WorkContratoTest {
                     .andExpect(cumpleContrato());
         }
         llamar(get("/api/v1/repositorio").param("q", "Diseño de software").param("hashtag", "springboot")
-                .param("idFacultad", "1").param("idCarrera", "2").param("idMateria", "20").param("idSemestre", "30")
+                .param("idGrupo", "41").param("idFacultad", "1").param("idCarrera", "2").param("idMateria", "20")
+                .param("idSemestre", "30")
                 .param("idTipoTrabajo", "60").param("pagina", "1").param("tamano", "5"), estudiante(), null)
                 .andExpect(status().isOk()).andExpect(cumpleContrato());
-        verify(repositorioService).buscar(eq(new FiltrosRepositorio("Diseño de software", "springboot", 1, 2, 20, 30,
+        verify(repositorioService).buscar(eq(new FiltrosRepositorio("Diseño de software", "springboot", 41, 1, 2, 20, 30,
                 60)), eq(1), eq(5));
     }
 
@@ -420,6 +487,78 @@ class WorkContratoTest {
                 .andExpect(status().isNotFound()).andExpect(cumpleContrato());
         llamar(get("/api/v1/repositorio/0"), estudiante(), null)
                 .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    // ---------- Publico (anonimo, security: []) ----------
+
+    @Test
+    void busquedaPublicaSinTokenYConTokenInvalido() throws Exception {
+        when(repositorioService.buscarPublico(any(), anyInt(), anyInt())).thenReturn(new PaginaResponse<>(
+                List.of(TrabajoMock.repositorioResumen()), 0, 20, 1, 1));
+        llamar(get("/api/v1/publico/repositorio"), null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.contenido[0].calificacion").doesNotExist())
+                .andExpect(cumpleContrato());
+        // el token se ignora en las rutas publicas: uno vencido o falso no produce 401 ni consulta Redis
+        llamar(get("/api/v1/publico/repositorio"), "Bearer no-es-un-jwt", null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/publico/repositorio").param("q", "\"sistema de informacion\" -redes")
+                .param("hashtag", "springboot").param("idGrupo", "41").param("idFacultad", "1")
+                .param("idCarrera", "2").param("idMateria", "20").param("idSemestre", "30")
+                .param("idTipoTrabajo", "60").param("pagina", "1").param("tamano", "5"), null, null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        verify(repositorioService).buscarPublico(eq(new FiltrosRepositorio("\"sistema de informacion\" -redes",
+                "springboot", 41, 1, 2, 20, 30, 60)), eq(1), eq(5));
+        org.mockito.Mockito.verifyNoInteractions(revocacionTokenService);
+    }
+
+    @Test
+    void busquedaPublicaCerradaOInvalida() throws Exception {
+        when(repositorioService.buscarPublico(any(), anyInt(), anyInt())).thenThrow(NegocioException.accesoDenegado(
+                "El repositorio publico no esta habilitado: inicie sesion para consultar los trabajos."));
+        llamar(get("/api/v1/publico/repositorio"), null, null)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/publico/repositorio").param("tamano", "101"), null, null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(get("/api/v1/publico/repositorio").param("idGrupo", "0"), null, null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void fichaPublicaSinToken() throws Exception {
+        when(repositorioService.obtenerPublico(7)).thenReturn(TrabajoMock.publico());
+        llamar(get("/api/v1/publico/repositorio/7"), null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.calificacion").doesNotExist())
+                .andExpect(jsonPath("$.data.historial").doesNotExist())
+                .andExpect(cumpleContrato());
+        when(repositorioService.obtenerPublico(8)).thenThrow(NegocioException.noEncontrado("No existe el trabajo 8."));
+        llamar(get("/api/v1/publico/repositorio/8"), null, null)
+                .andExpect(status().isNotFound()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/publico/repositorio/0"), null, null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void estadoDelAccesoPublico() throws Exception {
+        when(repositorioService.estadoPublico()).thenReturn(new EstadoAccesoPublicoResponse(true, List.of(1)));
+        llamar(get("/api/v1/publico/estado"), null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.habilitado").value(true))
+                .andExpect(jsonPath("$.data.facultades[0]").value(1))
+                .andExpect(cumpleContrato());
+        when(repositorioService.estadoPublico()).thenReturn(new EstadoAccesoPublicoResponse(false, List.of()));
+        llamar(get("/api/v1/publico/estado"), estudiante(), null)
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.habilitado").value(false))
+                .andExpect(cumpleContrato());
+    }
+
+    @Test
+    void anonimoNoDescargaNiEscribeEnRutasPublicas() throws Exception {
+        llamar(get("/api/v1/documentos/70/descarga"), null, null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContrato());
+        // solo GET es publico: cualquier otro metodo queda denegado
+        mvc.perform(post("/api/v1/publico/repositorio")).andExpect(status().isUnauthorized());
     }
 
     // ---------- Seguridad ----------

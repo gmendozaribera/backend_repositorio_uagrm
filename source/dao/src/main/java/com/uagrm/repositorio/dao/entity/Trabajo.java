@@ -13,6 +13,7 @@ import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -60,7 +61,8 @@ public class Trabajo {
     @Column(length = 3000)
     private String observaciones;
 
-    /** Sprint 4. */
+    /** Solo en EVALUADO (0..ConfigFacultad.escalaCalifMax de la facultad); null en cualquier otro estado. */
+    @Min(0)
     private Integer calificacion;
 
     @NotNull

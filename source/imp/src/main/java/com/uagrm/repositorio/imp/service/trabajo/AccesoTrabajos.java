@@ -1,6 +1,5 @@
 package com.uagrm.repositorio.imp.service.trabajo;
 
-import com.uagrm.repositorio.dao.entity.GrupoDocenteId;
 import com.uagrm.repositorio.dao.entity.Trabajo;
 import com.uagrm.repositorio.dao.entity.TransicionTrabajo;
 import com.uagrm.repositorio.dao.entity.EstadoTrabajo;
@@ -11,6 +10,7 @@ import com.uagrm.repositorio.dto.trabajo.AccionesResponse;
 import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.security.UsuarioAutenticado;
 import java.util.Objects;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
@@ -34,8 +34,12 @@ public class AccesoTrabajos {
     private final TrabajoRepository trabajoRepository;
     private final GrupoDocenteRepository grupoDocenteRepository;
 
-    /** Relacion del usuario con un trabajo concreto. */
-    public record Permisos(boolean autor, boolean docenteDelGrupo, boolean admin) {
+    /**
+     * Relacion del usuario con un trabajo concreto.
+     *
+     * @param adminCurso docente del grupo marcado como Administrador de Curso (grupo_docente.es_admin_curso)
+     */
+    public record Permisos(boolean autor, boolean docenteDelGrupo, boolean adminCurso, boolean admin) {
 
         public boolean visible() {
             return autor || docenteDelGrupo || admin;
@@ -69,9 +73,10 @@ public class AccesoTrabajos {
     public Permisos permisos(Trabajo trabajo, ActorTrabajo actor) {
         boolean autor = actor.esEstudiante() && trabajo.getAutores().stream()
                 .anyMatch(p -> Objects.equals(p.getIdPersona(), actor.idPersona()));
-        boolean docente = actor.esDocente() && grupoDocenteRepository.existsById(
-                new GrupoDocenteId(trabajo.getGrupo().getIdGrupo(), actor.idUsuario()));
-        return new Permisos(autor, docente, actor.esAdmin());
+        Optional<Boolean> asignacion = actor.esDocente()
+                ? grupoDocenteRepository.findEsAdminCurso(trabajo.getGrupo().getIdGrupo(), actor.idUsuario())
+                : Optional.empty();
+        return new Permisos(autor, asignacion.isPresent(), asignacion.orElse(false), actor.esAdmin());
     }
 
     /**
@@ -104,6 +109,17 @@ public class AccesoTrabajos {
         }
     }
 
+    /**
+     * Calificar: solo el Administrador de Curso del grupo. Un docente del grupo sin ese rol (u otro rol que si ve
+     * el trabajo) recibe 403; quien no ve el trabajo ya recibio 404 en {@link #paraModificar}.
+     */
+    public void exigirAdminCurso(Trabajo trabajo, ActorTrabajo actor) {
+        if (!permisos(trabajo, actor).adminCurso()) {
+            throw NegocioException.accesoDenegado(
+                    "Solo el Administrador de Curso del grupo puede calificar el trabajo.");
+        }
+    }
+
     /** Acciones disponibles ahora para el actor, segun su relacion con el trabajo y la maquina de estados. */
     public AccionesResponse acciones(Trabajo trabajo, Permisos permisos) {
         EstadoTrabajo estado = trabajo.getEstado();
@@ -115,7 +131,8 @@ public class AccesoTrabajos {
                 autor && estado == EstadoTrabajo.BORRADOR,
                 docente && TransicionTrabajo.TOMAR_REVISION.aplicableDesde(estado),
                 docente && TransicionTrabajo.APROBAR.aplicableDesde(estado),
-                docente && TransicionTrabajo.RECHAZAR.aplicableDesde(estado));
+                docente && TransicionTrabajo.RECHAZAR.aplicableDesde(estado),
+                permisos.adminCurso() && TransicionTrabajo.CALIFICAR.aplicableDesde(estado));
     }
 
     private void exigirVisible(Trabajo trabajo, ActorTrabajo actor) {
