@@ -18,6 +18,8 @@ import com.uagrm.repositorio.dto.trabajo.CambioEstadoResponse;
 import com.uagrm.repositorio.dto.trabajo.DocumentoResponse;
 import com.uagrm.repositorio.dto.trabajo.FormatoCategoriaResponse;
 import com.uagrm.repositorio.dto.trabajo.ReglasDocumentosResponse;
+import com.uagrm.repositorio.dto.trabajo.TrabajoPublicoResponse;
+import com.uagrm.repositorio.dto.trabajo.TrabajoRepositorioResumenResponse;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResponse;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResumenResponse;
 import java.time.Instant;
@@ -141,6 +143,25 @@ public final class TrabajoMock {
         return new TrabajoResumenResponse(ID_TRABAJO, "Sistema de inventarios", estado, 40, "SA", 20, "INF412",
                 "Ingenieria de Software I", 30, "2-2026", "Proyecto de grado", List.of("Juan Perez", "Ana Rojas"),
                 FECHA, estado == EstadoTrabajo.BORRADOR ? null : FECHA);
+    }
+
+    /** Tarjeta de un resultado del repositorio. */
+    public static TrabajoRepositorioResumenResponse repositorioResumen() {
+        return new TrabajoRepositorioResumenResponse(ID_TRABAJO, "Sistema de inventarios",
+                "Analisis, diseno e implementacion de un sistema de inventarios.", List.of("inventarios", "springboot"),
+                List.of("Juan Perez", "Ana Rojas"), "INF412", "Ingenieria de Software I", "2-2026", "Proyecto de grado",
+                FECHA);
+    }
+
+    /** Ficha publica del repositorio (trabajo EVALUADO) vista por el autor. */
+    public static TrabajoPublicoResponse publico() {
+        return new TrabajoPublicoResponse(ID_TRABAJO, "Sistema de inventarios",
+                "Analisis, diseno e implementacion de un sistema de inventarios.",
+                40, "SA", 20, "INF412", "Ingenieria de Software I", 30, "2-2026", 1, 60, "Proyecto de grado",
+                List.of(new AutorResponse(ID_AUTOR, "Juan", "Perez", REGISTRO_AUTOR, true),
+                        new AutorResponse(ID_COAUTOR, "Ana", "Rojas", REGISTRO_COAUTOR, false)),
+                List.of("inventarios", "springboot"),
+                List.of(documentoResponse(), enlaceResponse()), FECHA);
     }
 
     public static ReglasDocumentosResponse reglas() {

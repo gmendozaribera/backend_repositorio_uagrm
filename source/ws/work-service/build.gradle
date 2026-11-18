@@ -22,6 +22,12 @@ dependencies {
     // Integracion real con MinIO (se salta si no hay Docker)
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
     testImplementation 'org.testcontainers:testcontainers-minio'
+    // Busqueda del repositorio contra PostgreSQL real (unaccent, Specifications) con el esquema de las
+    // migraciones reales: Flyway solo en tests (en ejecucion las sigue aplicando auth-service)
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-flyway'
+    testImplementation 'org.flywaydb:flyway-database-postgresql'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
 }
 
 // Solo el jar ejecutable (evita el -plain.jar en build/libs)

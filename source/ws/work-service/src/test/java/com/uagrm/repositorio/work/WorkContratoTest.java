@@ -25,9 +25,11 @@ import com.atlassian.oai.validator.report.LevelResolver;
 import com.atlassian.oai.validator.report.ValidationReport;
 import com.uagrm.repositorio.dao.entity.CategoriaDocumento;
 import com.uagrm.repositorio.dao.entity.EstadoTrabajo;
+import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.dao.entity.Usuario;
 import com.uagrm.repositorio.dto.common.PaginaResponse;
 import com.uagrm.repositorio.dto.trabajo.AccionesResponse;
+import com.uagrm.repositorio.dto.trabajo.FiltrosRepositorio;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
 import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
@@ -36,10 +38,13 @@ import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import com.uagrm.repositorio.imp.service.documento.DescargaArchivo;
 import com.uagrm.repositorio.imp.service.documento.DocumentoService;
+import com.uagrm.repositorio.imp.service.trabajo.RepositorioService;
 import com.uagrm.repositorio.imp.service.trabajo.TrabajoService;
 import com.uagrm.repositorio.mockup.TrabajoMock;
+import com.uagrm.repositorio.mockup.UsuarioMock;
 import com.uagrm.repositorio.work.config.SecurityConfig;
 import com.uagrm.repositorio.work.controller.DocumentoController;
+import com.uagrm.repositorio.work.controller.RepositorioController;
 import com.uagrm.repositorio.work.controller.TrabajoController;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -70,7 +75,7 @@ import org.springframework.test.web.servlet.request.AbstractMockHttpServletReque
  * application/octet-stream y la respuesta real lleva el tipo del archivo, asi que se verifican status y cabeceras
  * (Content-Disposition, Content-Type, nosniff) sin el validador.</p>
  */
-@WebMvcTest(controllers = {TrabajoController.class, DocumentoController.class})
+@WebMvcTest(controllers = {TrabajoController.class, DocumentoController.class, RepositorioController.class})
 @Import({SecurityConfig.class, SeguridadConfig.class, SeguridadErrorHandler.class, JwtService.class})
 @TestPropertySource(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
@@ -124,6 +129,8 @@ class WorkContratoTest {
     private TrabajoService trabajoService;
     @MockitoBean
     private DocumentoService documentoService;
+    @MockitoBean
+    private RepositorioService repositorioService;
     @MockitoBean
     private RevocacionTokenService revocacionTokenService;
 
@@ -350,6 +357,68 @@ class WorkContratoTest {
         llamar(get("/api/v1/documentos/reglas").param("idFacultad", "99"), docente(), null)
                 .andExpect(status().isNotFound()).andExpect(cumpleContrato());
         llamar(get("/api/v1/documentos/reglas"), docente(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    // ---------- Repositorio ----------
+
+    @Test
+    void buscarEnElRepositorioCualquierRol() throws Exception {
+        when(repositorioService.buscar(any(), anyInt(), anyInt())).thenReturn(new PaginaResponse<>(
+                List.of(TrabajoMock.repositorioResumen()), 0, 20, 1, 1));
+        for (String rol : new String[]{estudiante(), docente(), admin()}) {
+            llamar(get("/api/v1/repositorio"), rol, null)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.contenido[0].extracto").exists())
+                    .andExpect(jsonPath("$.data.contenido[0].estado").doesNotExist())
+                    .andExpect(cumpleContrato());
+        }
+        llamar(get("/api/v1/repositorio").param("q", "Diseño de software").param("hashtag", "springboot")
+                .param("idFacultad", "1").param("idCarrera", "2").param("idMateria", "20").param("idSemestre", "30")
+                .param("idTipoTrabajo", "60").param("pagina", "1").param("tamano", "5"), estudiante(), null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        verify(repositorioService).buscar(eq(new FiltrosRepositorio("Diseño de software", "springboot", 1, 2, 20, 30,
+                60)), eq(1), eq(5));
+    }
+
+    @Test
+    void buscarConParametrosInvalidosDevuelve400() throws Exception {
+        llamar(get("/api/v1/repositorio").param("q", "x".repeat(101)), estudiante(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(get("/api/v1/repositorio").param("idCarrera", "0"), estudiante(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(get("/api/v1/repositorio").param("idMateria", "abc"), estudiante(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(get("/api/v1/repositorio").param("tamano", "101"), estudiante(), null)
+                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+    }
+
+    @Test
+    void repositorioSinTokenOConPasswordPendiente() throws Exception {
+        llamar(get("/api/v1/repositorio"), null, null).andExpect(status().isUnauthorized()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/repositorio/7"), null, null).andExpect(status().isUnauthorized()).andExpect(cumpleContrato());
+        Usuario pendiente = UsuarioMock.usuario(41, "219012399", TipoUsuario.ESTUDIANTE);
+        pendiente.setRequiereCambioPassword(true);
+        llamar(get("/api/v1/repositorio"), token(pendiente), null)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/repositorio/7"), token(pendiente), null)
+                .andExpect(status().isForbidden()).andExpect(cumpleContrato());
+    }
+
+    @Test
+    void fichaDelRepositorioY404() throws Exception {
+        when(repositorioService.obtener(any(), eq(7))).thenReturn(TrabajoMock.publico());
+        llamar(get("/api/v1/repositorio/7"), estudiante(), null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.autores[0].esUsuarioActual").value(true))
+                .andExpect(jsonPath("$.data.calificacion").doesNotExist())
+                .andExpect(jsonPath("$.data.historial").doesNotExist())
+                .andExpect(cumpleContrato());
+        llamar(get("/api/v1/repositorio/7"), docente(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        when(repositorioService.obtener(any(), eq(8))).thenThrow(NegocioException.noEncontrado("No existe el trabajo 8."));
+        llamar(get("/api/v1/repositorio/8"), estudiante(), null)
+                .andExpect(status().isNotFound()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/repositorio/0"), estudiante(), null)
                 .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
     }
 

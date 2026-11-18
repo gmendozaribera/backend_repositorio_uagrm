@@ -184,6 +184,29 @@ class DocumentoServiceTest {
     }
 
     @Test
+    void trabajoEvaluadoLoDescargaCualquierUsuarioAutenticado() {
+        Trabajo evaluado = TrabajoMock.trabajo(EstadoTrabajo.EVALUADO);
+        Documento pdf = TrabajoMock.pdf(evaluado);
+        when(documentoRepository.findConTrabajoByIdDocumento(70)).thenReturn(Optional.of(pdf));
+        InputStream contenido = new ByteArrayInputStream(ValidadorArchivosTest.PDF);
+        when(almacenamiento.descargar(pdf.getRutaArchivo())).thenReturn(contenido);
+
+        DescargaArchivo descarga = service.descargar(jwt(TrabajoMock.ID_OTRO_ESTUDIANTE), 70);
+        assertThat(descarga.contenido()).isSameAs(contenido);
+        verify(grupoDocenteRepository, never()).existsById(any());  // publicado: no hace falta ver la relacion
+    }
+
+    @Test
+    void trabajoNoEvaluadoAjenoSigueSiendo404() {
+        for (EstadoTrabajo estado : new EstadoTrabajo[]{EstadoTrabajo.APROBADO, EstadoTrabajo.PENDIENTE}) {
+            Documento pdf = TrabajoMock.pdf(TrabajoMock.trabajo(estado));
+            when(documentoRepository.findConTrabajoByIdDocumento(70)).thenReturn(Optional.of(pdf));
+            assertStatus(() -> service.descargar(jwt(TrabajoMock.ID_OTRO_ESTUDIANTE), 70), HttpStatus.NOT_FOUND);
+        }
+        verifyNoInteractions(almacenamiento);
+    }
+
+    @Test
     void autorYDocenteDelGrupoDescargan() {
         Documento pdf = TrabajoMock.pdf(trabajo);
         when(documentoRepository.findConTrabajoByIdDocumento(70)).thenReturn(Optional.of(pdf));

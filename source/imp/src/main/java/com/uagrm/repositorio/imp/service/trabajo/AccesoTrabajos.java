@@ -22,6 +22,9 @@ import org.springframework.stereotype.Component;
  * cualquier otro usuario el trabajo "no existe" (404, el mismo mensaje que un id inexistente): asi nadie puede
  * descubrir que trabajos hay probando numeros. Quien SI lo ve pero no puede hacer una accion (un docente que
  * intenta editar) recibe 403; si la accion no corresponde al estado actual, 409.</p>
+ *
+ * <p>Excepcion: un trabajo EVALUADO esta publicado. Su ficha publica la sirve {@link RepositorioService} y sus
+ * archivos los puede descargar cualquier usuario autenticado ({@link #puedeDescargar}).</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -69,6 +72,15 @@ public class AccesoTrabajos {
         boolean docente = actor.esDocente() && grupoDocenteRepository.existsById(
                 new GrupoDocenteId(trabajo.getGrupo().getIdGrupo(), actor.idUsuario()));
         return new Permisos(autor, docente, actor.esAdmin());
+    }
+
+    /**
+     * Descargar un archivo: un trabajo EVALUADO esta publicado en el repositorio y cualquier usuario autenticado
+     * puede descargar sus archivos; en cualquier otro estado, solo quien puede ver el trabajo. Ver el detalle
+     * interno (/trabajos/{id}) NO se abre: sigue {@link #paraLeer}.
+     */
+    public boolean puedeDescargar(Trabajo trabajo, ActorTrabajo actor) {
+        return trabajo.getEstado() == EstadoTrabajo.EVALUADO || permisos(trabajo, actor).visible();
     }
 
     /** 403 si no es autor; 409 si el estado no permite editar. */

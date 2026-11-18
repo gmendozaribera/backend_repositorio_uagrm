@@ -10,8 +10,11 @@ import com.uagrm.repositorio.dto.trabajo.AccionesResponse;
 import com.uagrm.repositorio.dto.trabajo.AutorResponse;
 import com.uagrm.repositorio.dto.trabajo.CambioEstadoResponse;
 import com.uagrm.repositorio.dto.trabajo.DocumentoResponse;
+import com.uagrm.repositorio.dto.trabajo.TrabajoPublicoResponse;
+import com.uagrm.repositorio.dto.trabajo.TrabajoRepositorioResumenResponse;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResponse;
 import com.uagrm.repositorio.dto.trabajo.TrabajoResumenResponse;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -27,6 +30,9 @@ import org.mapstruct.Named;
  */
 @Mapper
 public interface TrabajoMapper {
+
+    /** Largo maximo (en caracteres, antes de "...") del extracto de las tarjetas del repositorio. */
+    int LARGO_EXTRACTO = 200;
 
     @Mapping(target = "idTrabajo", source = "trabajo.idTrabajo")
     @Mapping(target = "titulo", source = "trabajo.titulo")
@@ -53,6 +59,62 @@ public interface TrabajoMapper {
     @Mapping(target = "fechaEnvio", source = "trabajo.fechaEnvio")
     TrabajoResponse toResponse(Trabajo trabajo, List<Documento> documentos, List<TrabajoHistorial> historial,
                                AccionesResponse acciones, @Context Integer idPersonaActual);
+
+    /** Ficha publica del repositorio: sin calificacion, observaciones, historial ni acciones. */
+    @Mapping(target = "idTrabajo", source = "trabajo.idTrabajo")
+    @Mapping(target = "titulo", source = "trabajo.titulo")
+    @Mapping(target = "resumen", source = "trabajo.resumen")
+    @Mapping(target = "idGrupo", source = "trabajo.grupo.idGrupo")
+    @Mapping(target = "grupo", source = "trabajo.grupo.nombre")
+    @Mapping(target = "idMateria", source = "trabajo.materia.idMateria")
+    @Mapping(target = "siglaMateria", source = "trabajo.materia.sigla")
+    @Mapping(target = "nombreMateria", source = "trabajo.materia.nombre")
+    @Mapping(target = "idSemestre", source = "trabajo.semestre.idSemestre")
+    @Mapping(target = "periodo", source = "trabajo.semestre", qualifiedByName = "periodo")
+    @Mapping(target = "idFacultad", source = "trabajo.materia.facultad.idFacultad")
+    @Mapping(target = "idTipoTrabajo", source = "trabajo.tipoTrabajo.idTipoTrabajo")
+    @Mapping(target = "tipoTrabajo", source = "trabajo.tipoTrabajo.nombre")
+    @Mapping(target = "autores", source = "trabajo", qualifiedByName = "autores")
+    @Mapping(target = "hashtags", source = "trabajo.hashtags", qualifiedByName = "hashtags")
+    @Mapping(target = "documentos", source = "documentos")
+    @Mapping(target = "fechaPublicacion", source = "fechaPublicacion")
+    TrabajoPublicoResponse toPublico(Trabajo trabajo, List<Documento> documentos, Instant fechaPublicacion,
+                                     @Context Integer idPersonaActual);
+
+    /** Tarjeta de un resultado del repositorio. */
+    @Mapping(target = "idTrabajo", source = "trabajo.idTrabajo")
+    @Mapping(target = "titulo", source = "trabajo.titulo")
+    @Mapping(target = "extracto", source = "trabajo.resumen", qualifiedByName = "extracto")
+    @Mapping(target = "hashtags", source = "trabajo.hashtags", qualifiedByName = "hashtags")
+    @Mapping(target = "autores", source = "trabajo", qualifiedByName = "nombresAutores")
+    @Mapping(target = "siglaMateria", source = "trabajo.materia.sigla")
+    @Mapping(target = "nombreMateria", source = "trabajo.materia.nombre")
+    @Mapping(target = "periodo", source = "trabajo.semestre", qualifiedByName = "periodo")
+    @Mapping(target = "tipoTrabajo", source = "trabajo.tipoTrabajo.nombre")
+    @Mapping(target = "fechaPublicacion", source = "fechaPublicacion")
+    TrabajoRepositorioResumenResponse toRepositorioResumen(Trabajo trabajo, Instant fechaPublicacion);
+
+    /**
+     * Extracto para las tarjetas: espacios y saltos de linea colapsados; si pasa de {@link #LARGO_EXTRACTO}
+     * caracteres se corta en el ultimo espacio dentro del limite (o en el limite si no hay ninguno razonable),
+     * sin puntuacion colgando, y se agrega "...".
+     */
+    @Named("extracto")
+    default String extracto(String resumen) {
+        if (resumen == null) {
+            return null;
+        }
+        String texto = resumen.strip().replaceAll("\\s+", " ");
+        if (texto.length() <= LARGO_EXTRACTO) {
+            return texto;
+        }
+        int corte = texto.lastIndexOf(' ', LARGO_EXTRACTO);
+        if (corte < LARGO_EXTRACTO / 2) {  // una "palabra" enorme (p. ej. una URL): se corta en el limite
+            corte = Character.isHighSurrogate(texto.charAt(LARGO_EXTRACTO - 1)) ? LARGO_EXTRACTO - 1 : LARGO_EXTRACTO;
+        }
+        String cortado = texto.substring(0, corte).replaceAll("[\\s.,;:\\-]+$", "");
+        return cortado + "...";
+    }
 
     @Mapping(target = "idGrupo", source = "grupo.idGrupo")
     @Mapping(target = "grupo", source = "grupo.nombre")

@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.tomcat.util.http.InvalidParameterException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -93,6 +94,19 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
                 "No se pudo leer el archivo enviado.");
         problem.setTitle("Archivo invalido");
+        return conTimestamp(problem);
+    }
+
+    /**
+     * Query string con bytes que no son UTF-8 valido (p. ej. "informaci%F3n" codificado en Latin-1): Tomcat no
+     * puede decodificar el parametro. Es un error del cliente (400), no del servidor.
+     */
+    @ExceptionHandler(InvalidParameterException.class)
+    public ProblemDetail handleParametroIlegible(InvalidParameterException ex) {
+        log.warn("Parametro con codificacion invalida: {}", ex.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "Un parametro de la URL no esta codificado en UTF-8.");
+        problem.setTitle("Datos invalidos");
         return conTimestamp(problem);
     }
 

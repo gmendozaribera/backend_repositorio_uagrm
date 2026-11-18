@@ -621,7 +621,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RespuestaPaginaTrabajos'
+                $ref: '#/components/schemas/RespuestaPaginaRepositorio'
         '400':
           $ref: '#/components/responses/DatosInvalidos'
         '401':
@@ -1169,6 +1169,59 @@ components:
           type: string
           format: date-time
           description: Fecha en que el trabajo paso a EVALUADO (ultima actualizacion mientras no exista).
+    TrabajoRepositorioResumen:
+      type: object
+      description: Tarjeta de un resultado del repositorio (trabajo EVALUADO).
+      required: [idTrabajo, titulo, extracto, hashtags, autores, siglaMateria, nombreMateria, periodo, tipoTrabajo, fechaPublicacion]
+      properties:
+        idTrabajo:
+          type: integer
+          format: int32
+        titulo:
+          type: string
+        extracto:
+          type: string
+          description: Primeros ~200 caracteres del resumen, cortado en un limite de palabra y con '...' si se corto.
+        hashtags:
+          type: array
+          items:
+            type: string
+        autores:
+          type: array
+          items:
+            type: string
+          description: Nombres completos de los autores.
+        siglaMateria:
+          type: string
+        nombreMateria:
+          type: string
+        periodo:
+          type: string
+        tipoTrabajo:
+          type: string
+        fechaPublicacion:
+          type: string
+          format: date-time
+    PaginaRepositorio:
+      type: object
+      required: [contenido, pagina, tamano, totalElementos, totalPaginas]
+      properties:
+        contenido:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrabajoRepositorioResumen'
+        pagina:
+          type: integer
+          format: int32
+        tamano:
+          type: integer
+          format: int32
+        totalElementos:
+          type: integer
+          format: int64
+        totalPaginas:
+          type: integer
+          format: int32
     FormatoCategoria:
       type: object
       required: [categoria, extensiones, permiteEnlace, hostsEnlace, tamanoMaxMB]
@@ -1239,6 +1292,20 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/Trabajo'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    RespuestaPaginaRepositorio:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/PaginaRepositorio'
         message:
           type: string
         status:

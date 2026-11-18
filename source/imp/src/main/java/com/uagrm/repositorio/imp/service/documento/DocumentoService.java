@@ -177,13 +177,16 @@ public class DocumentoService {
         }
     }
 
-    /** Proxy de descarga: verifica que el usuario pueda ver el trabajo en cada descarga. Enlace → 409. */
+    /**
+     * Proxy de descarga: verifica los permisos en cada descarga (trabajo EVALUADO: cualquier usuario autenticado;
+     * si no, quien puede ver el trabajo). Enlace → 409.
+     */
     @Transactional(readOnly = true)
     public DescargaArchivo descargar(Jwt jwt, Integer idDocumento) {
         ActorTrabajo actor = acceso.actor(jwt);
         Documento documento = documentoRepository.findConTrabajoByIdDocumento(idDocumento)
                 .orElseThrow(() -> noExiste(idDocumento));
-        if (!acceso.permisos(documento.getTrabajo(), actor).visible()) {
+        if (!acceso.puedeDescargar(documento.getTrabajo(), actor)) {
             throw noExiste(idDocumento);
         }
         if (documento.getTipo() == TipoDocumento.ENLACE) {

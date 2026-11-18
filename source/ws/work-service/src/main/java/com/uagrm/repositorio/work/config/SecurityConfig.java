@@ -21,7 +21,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * revocacion de Redis (fail-closed: 503 si Redis cae).
  *
  * <p>Aqui se filtra por ROL (primera barrera): crear/editar/subir/enviar solo ESTUDIANTE; revisar/aprobar/rechazar
- * solo DOCENTE; la bandeja DOCENTE o ADMIN; ver y descargar cualquier rol. La relacion con el trabajo concreto
+ * solo DOCENTE; la bandeja DOCENTE o ADMIN; ver, descargar y el repositorio (trabajos EVALUADO) cualquier rol. La relacion con el trabajo concreto
  * (autor, docente asignado al grupo) la verifica el service en cada operacion (segunda barrera), y un trabajo
  * que el usuario no puede ver responde 404. Quien aun debe cambiar su contrasena no tiene rol: 403 en todo.</p>
  */
@@ -60,6 +60,9 @@ public class SecurityConfig {
                                 TRABAJO + "/rechazar").hasRole(docente)
                         .requestMatchers(HttpMethod.GET, TRABAJO, "/api/v1/documentos/*/descarga",
                                 "/api/v1/documentos/reglas").hasAnyRole(admin, docente, estudiante)
+                        // Repositorio: trabajos EVALUADO, publicos para cualquier rol autenticado
+                        .requestMatchers(HttpMethod.GET, "/api/v1/repositorio", "/api/v1/repositorio/*")
+                        .hasAnyRole(admin, docente, estudiante)
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth
                         .jwt(jwt -> jwt.decoder(accessTokenDecoder).jwtAuthenticationConverter(jwtAuthenticationConverter))
