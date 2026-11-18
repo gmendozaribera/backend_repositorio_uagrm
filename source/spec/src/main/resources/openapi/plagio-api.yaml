@@ -15,7 +15,9 @@ info:
        produccion). Mientras tanto el frontend consulta `GET .../estado` (pensado para cada 5 segundos; no toca la
        base de datos mientras el estado este en cache).
     3. Al terminar se guarda el resultado y se notifica al docente que lo inicio.
-    - Fuentes: el repositorio interno siempre; internet solo si `ConfigFacultad.comparacionInternet = true`.
+    - Fuentes: el repositorio interno siempre (todos los trabajos enviados, salvo borradores y el propio);
+      internet solo si `ConfigFacultad.comparacionInternet = true`. De una fuente interna no publicada solo se
+      informa el porcentaje (sin titulo ni id).
     - Semaforo segun los umbrales de la facultad: `OK` (verde) < `umbralPlagioMedio` <= `MEDIO` (amarillo)
       < `umbralPlagioAlto` <= `ALTO` (rojo).
     - Un solo analisis en curso por trabajo (409). Un analisis que no termina en el tiempo maximo del sistema
@@ -284,6 +286,9 @@ components:
           $ref: '#/components/schemas/TipoFuente'
         titulo:
           type: string
+          description: |
+            Titulo de la fuente. Para una fuente INTERNA que no esta publicada (no EVALUADO) se devuelve el texto
+            generico "Trabajo no publicado del repositorio interno" (no se revelan trabajos ajenos no publicados).
           example: Sistema de inventarios para PYMES
         url:
           type: string
@@ -293,7 +298,7 @@ components:
           type: integer
           format: int32
           nullable: true
-          description: Solo fuentes internas (otro trabajo del repositorio).
+          description: Solo fuentes INTERNA publicadas (EVALUADO), enlazable a /repositorio/{idTrabajo}; null en las no publicadas.
         porcentaje:
           type: number
           format: double
