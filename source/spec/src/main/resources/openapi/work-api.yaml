@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Repositorio Digital UAGRM - work-service
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Trabajos academicos: creacion por el estudiante, documentos por fase (archivos en MinIO o enlaces externos),
     envio a revision y revision por los docentes del grupo.
@@ -15,7 +15,7 @@ info:
     - `PENDIENTE` -> (docente del grupo toma la revision) -> `EN_REVISION`
     - `PENDIENTE` | `EN_REVISION` -> (docente) -> `APROBADO` | `APROBADO_CON_OBSERVACIONES` | `RECHAZADO`
     - `RECHAZADO` | `APROBADO_CON_OBSERVACIONES` -> (autor corrige y reenvia) -> `PENDIENTE`
-    - `APROBADO` -> `EVALUADO` llega en el Sprint 4 (calificacion).
+    - `APROBADO` -> (Administrador de Curso del grupo califica) -> `EVALUADO`: queda publicado en el repositorio.
     Una transicion no permitida devuelve 409. Cada transicion queda en el historial del trabajo.
 
     **Quien ve y hace que**
@@ -23,11 +23,13 @@ info:
       trabajo "no existe" (404, para no revelar ids).
     - **Repositorio:** los trabajos `EVALUADO` son publicos para cualquier usuario autenticado
       (`/api/v1/repositorio`): metadatos, autores, hashtags y documentos, sin calificacion, observaciones ni
-      historial. Sus archivos los puede descargar cualquier usuario autenticado. El acceso anonimo (segun
-      `ConfigFacultad.accesoExterno`) y la busqueda full-text llegan en el Sprint 4.
+      historial. Sus archivos los puede descargar cualquier usuario autenticado.
+    - **Acceso anonimo** (`/api/v1/publico/**`, sin token): solo trabajos `EVALUADO` de facultades con
+      `ConfigFacultad.accesoExterno = true`, solo metadatos; descargar archivos siempre exige iniciar sesion.
     - Crear, editar, subir/quitar documentos, enviar y eliminar: solo sus autores (ESTUDIANTE), y solo mientras el
       trabajo es editable (`BORRADOR`, `RECHAZADO`, `APROBADO_CON_OBSERVACIONES`). Eliminar: solo en `BORRADOR`.
     - Revisar, aprobar y rechazar: solo los docentes asignados al grupo del trabajo.
+    - Calificar: solo el docente que es **Administrador de Curso** (`esAdminCurso`) de ese grupo.
 
     **Archivos**
     - Formatos por categoria: DOCUMENTO (pdf, docx, odt), PRESENTACION (pptx, pdf), CODIGO (zip, rar, 7z),
@@ -58,6 +60,8 @@ tags:
     description: Archivos y enlaces de un trabajo
   - name: Repositorio
     description: Consulta de trabajos evaluados (publicados)
+  - name: Publico
+    description: Consulta anonima del repositorio (segun la configuracion de cada facultad)
 
 paths:
   # ---------------------------------------------------------------- Trabajos
@@ -364,6 +368,43 @@ paths:
         '503':
           $ref: '#/components/responses/ServicioNoDisponible'
 
+  /api/v1/trabajos/{id}/calificar:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Revision]
+      operationId: calificarTrabajo
+      summary: Calificar y publicar (Administrador de Curso del grupo)
+      description: |
+        Solo desde `APROBADO` (409 en otro estado). La calificacion va de 0 a `ConfigFacultad.escalaCalifMax`
+        de la facultad del trabajo (400 con el rango permitido). El trabajo pasa a `EVALUADO`, queda visible en el
+        repositorio y se notifica a los autores. Un docente del grupo que no es Administrador de Curso recibe 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalificarRequest'
+      responses:
+        '200':
+          description: Trabajo evaluado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajo'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutenticado'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          $ref: '#/components/responses/Conflicto'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
   # ---------------------------------------------------------------- Documentos
   /api/v1/trabajos/{id}/documentos:
     parameters:
@@ -556,9 +597,10 @@ paths:
       operationId: buscarRepositorio
       summary: Buscar trabajos evaluados (cualquier usuario autenticado)
       description: |
-        Solo trabajos `EVALUADO`. Todos los filtros se combinan (Y). `q` busca, sin distinguir mayusculas ni
-        tildes, en titulo, resumen y hashtags (busqueda simple; la full-text llega en el Sprint 4).
-        Orden: mas recientes primero.
+        Solo trabajos `EVALUADO`. Todos los filtros se combinan (Y).
+        `q` es una busqueda **full-text** en espanol (sin distinguir mayusculas ni tildes, con raices:
+        "sistemas" encuentra "sistema") sobre titulo, resumen y hashtags. Admite frases entre comillas y
+        `-palabra` para excluir. Orden: con `q`, por relevancia; sin `q`, los mas recientes primero.
       parameters:
         - name: q
           in: query
@@ -573,6 +615,14 @@ paths:
           schema:
             type: string
             maxLength: 50
+        - name: idGrupo
+          in: query
+          required: false
+          description: Grupo del trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
         - name: idFacultad
           in: query
           required: false
@@ -654,6 +704,145 @@ paths:
           $ref: '#/components/responses/AccesoDenegado'
         '404':
           $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  # ---------------------------------------------------------------- Publico (anonimo)
+  /api/v1/publico/repositorio:
+    get:
+      tags: [Publico]
+      operationId: buscarRepositorioPublico
+      summary: Buscar trabajos evaluados sin iniciar sesion
+      security: []
+      description: |
+        Igual que `/api/v1/repositorio`, pero solo incluye trabajos de facultades con acceso externo habilitado.
+        Si ninguna facultad lo tiene habilitado responde 403. Solo trabajos `EVALUADO`. Todos los filtros se combinan (Y).
+        `q` es una busqueda **full-text** en espanol (sin distinguir mayusculas ni tildes, con raices:
+        "sistemas" encuentra "sistema") sobre titulo, resumen y hashtags. Admite frases entre comillas y
+        `-palabra` para excluir. Orden: con `q`, por relevancia; sin `q`, los mas recientes primero.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+        - name: hashtag
+          in: query
+          required: false
+          description: Hashtag exacto, sin '#'.
+          schema:
+            type: string
+            maxLength: 50
+        - name: idGrupo
+          in: query
+          required: false
+          description: Grupo del trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idFacultad
+          in: query
+          required: false
+          description: Facultad de la materia.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idCarrera
+          in: query
+          required: false
+          description: Al menos un autor es de esta carrera.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idMateria
+          in: query
+          required: false
+          description: Materia del trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idSemestre
+          in: query
+          required: false
+          description: Semestre del trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - name: idTipoTrabajo
+          in: query
+          required: false
+          description: Tipo de trabajo.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+        - $ref: '#/components/parameters/Pagina'
+        - $ref: '#/components/parameters/Tamano'
+      responses:
+        '200':
+          description: Pagina de resultados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaPaginaRepositorio'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/publico/repositorio/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Publico]
+      operationId: obtenerTrabajoPublicoAnonimo
+      summary: Ficha de un trabajo evaluado sin iniciar sesion
+      security: []
+      description: |
+        404 si no existe, no esta `EVALUADO` o su facultad no tiene acceso externo. Los documentos se listan pero
+        su descarga exige iniciar sesion.
+      responses:
+        '200':
+          description: Ficha del trabajo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaTrabajoPublico'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '403':
+          $ref: '#/components/responses/AccesoDenegado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '503':
+          $ref: '#/components/responses/ServicioNoDisponible'
+
+  /api/v1/publico/estado:
+    get:
+      tags: [Publico]
+      operationId: obtenerEstadoAccesoPublico
+      summary: Indica si existe acceso anonimo al repositorio
+      description: |
+        Sin token. `habilitado = true` si al menos una facultad tiene acceso externo; el frontend lo usa para
+        mostrar el repositorio publico o la pantalla de acceso restringido.
+      security: []
+      responses:
+        '200':
+          description: Estado del acceso anonimo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaEstadoAccesoPublico'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
         '503':
           $ref: '#/components/responses/ServicioNoDisponible'
 
@@ -851,6 +1040,16 @@ components:
           maxLength: 3000
           description: Con texto -> APROBADO_CON_OBSERVACIONES; vacio o null -> APROBADO.
           example: Corregir la bibliografia segun APA 7.
+    CalificarRequest:
+      type: object
+      required: [calificacion]
+      properties:
+        calificacion:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Entre 0 y la escala maxima de la facultad (ConfigFacultad.escalaCalifMax).
+          example: 85
     RechazarRequest:
       type: object
       required: [motivo]
@@ -980,8 +1179,10 @@ components:
     Acciones:
       type: object
       description: Lo que el usuario autenticado puede hacer ahora con este trabajo (el servidor lo vuelve a validar).
-      required: [editar, enviar, eliminar, revisar, aprobar, rechazar]
+      required: [editar, enviar, eliminar, revisar, aprobar, rechazar, calificar]
       properties:
+        calificar:
+          type: boolean
         editar:
           type: boolean
         enviar:
@@ -1046,8 +1247,19 @@ components:
           description: Ultima vez que se envio a revision.
     Trabajo:
       type: object
-      required: [idTrabajo, titulo, resumen, estado, observaciones, idGrupo, grupo, idMateria, siglaMateria, nombreMateria, idSemestre, periodo, idFacultad, idTipoTrabajo, tipoTrabajo, autores, hashtags, documentos, historial, acciones, fechaCreacion, fechaActualizacion, fechaEnvio]
+      required: [idTrabajo, titulo, resumen, estado, observaciones, calificacion, escalaCalifMax, idGrupo, grupo, idMateria, siglaMateria, nombreMateria, idSemestre, periodo, idFacultad, idTipoTrabajo, tipoTrabajo, autores, hashtags, documentos, historial, acciones, fechaCreacion, fechaActualizacion, fechaEnvio]
       properties:
+        calificacion:
+          type: integer
+          format: int32
+          nullable: true
+          description: Solo en EVALUADO; visible para autores, docentes del grupo y ADMIN (nunca en el repositorio).
+          example: 85
+        escalaCalifMax:
+          type: integer
+          format: int32
+          description: Escala maxima vigente de la facultad (para el formulario de calificacion).
+          example: 100
         idTrabajo:
           type: integer
           format: int32
@@ -1362,6 +1574,34 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/ReglasDocumentos'
+        message:
+          type: string
+        status:
+          type: integer
+          format: int32
+        timestamp:
+          type: string
+          format: date-time
+    EstadoAccesoPublico:
+      type: object
+      required: [habilitado, facultades]
+      properties:
+        habilitado:
+          type: boolean
+          example: true
+        facultades:
+          type: array
+          description: Ids de las facultades con acceso externo habilitado.
+          items:
+            type: integer
+            format: int32
+          example: [1]
+    RespuestaEstadoAccesoPublico:
+      type: object
+      required: [data, message, status, timestamp]
+      properties:
+        data:
+          $ref: '#/components/schemas/EstadoAccesoPublico'
         message:
           type: string
         status:
