@@ -57,7 +57,7 @@ const DECISIONS = [
   ]},
   { cat:"Stack y contratos (decisiones de implementación)", items:[
     { q:"Versión del stack", a:"Java 25 + Spring Boot 4.1.1 (Spring Security 7, Jackson 3, Hibernate 7, Gradle 9 multimodulo) en lugar de Java 17 / Boot 3. Frontend Angular 22 standalone, zoneless, signals, sin librería UI (CSS propio con la paleta del modelo), tests con Vitest." },
-    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.3.0, work-api 1.0.0." },
+    { q:"Contract-first con OpenAPI 3.0.3", a:"Cada servicio tiene su contrato en source/spec/src/main/resources/openapi/<servicio>-api.yaml y todo cambio de API empieza ahí. El backend NO genera código: <Servicio>ContratoTest valida cada request/response real contra el YAML (estricto con propiedades extra). El frontend genera modelos y cliente con ng-openapi-gen (código generado versionado). Contratos: auth-api 1.2.0, catalog-api 1.2.0, user-api 1.3.0, work-api 1.1.0." },
     { q:"Control de cambios de contrato", a:"script/contratos.sh (etapa 'Contratos' de Jenkins): Redocly lint + oasdiff breaking contra origin/main. Un breaking change falla el build salvo que se suba la versión MAYOR de info.version." },
     { q:"Mocks para desarrollo paralelo", a:"Prism 5.12.0 por contrato en docker-compose (profile mock): auth :4010, catalog :4011, user :4012, work :4013." },
     { q:"Puertos de los microservicios", a:"auth-service :8081, catalog-service :8082, user-service :8083 (se intercambiaron user y catalog respecto al modelo original porque catálogos se implementó primero). Nginx/proxy enrutan por prefijo: /api/v1/auth → 8081; /api/v1/usuarios, /tipos-usuario, /padron → 8083; resto → 8082." },
@@ -291,7 +291,7 @@ const API_GROUPS = [
     { m:"GET",    p:"/api/v1/fases",                            d:"Listar (idFacultad) — POST / PUT / DELETE" },
     { m:"GET",    p:"/api/v1/tipos-trabajo",                    d:"Listar (idFacultad) — POST / PUT / DELETE" },
   ]},
-  { group:"Trabajos y Revisión — work-service :8084 (work-api 1.0.0)", color:"#991B1B", endpoints:[
+  { group:"Trabajos, Revisión y Repositorio — work-service :8084 (work-api 1.1.0)", color:"#991B1B", endpoints:[
     { m:"POST",   p:"/api/v1/trabajos",                  d:"Crear trabajo en BORRADOR (ESTUDIANTE; materia y semestre salen del grupo)" },
     { m:"GET",    p:"/api/v1/trabajos/mios",             d:"Mis trabajos (autor o coautor), paginado" },
     { m:"GET",    p:"/api/v1/trabajos/revision",         d:"Bandeja del docente (sus grupos; ADMIN todos)" },
@@ -303,7 +303,8 @@ const API_GROUPS = [
     { m:"PATCH",  p:"/api/v1/trabajos/{id}/aprobar",     d:"Aprobar; con observaciones → APROBADO_CON_OBSERVACIONES" },
     { m:"PATCH",  p:"/api/v1/trabajos/{id}/rechazar",    d:"Rechazar con motivo obligatorio" },
     { m:"PATCH",  p:"/api/v1/trabajos/{id}/calificar",   d:"Calificar (Sprint 4)" },
-    { m:"GET",    p:"/api/v1/trabajos/search",           d:"Búsqueda full-text (Sprint 3-4, CU11)" },
+    { m:"GET",    p:"/api/v1/repositorio",               d:"Buscar trabajos EVALUADOS (q, hashtag, facultad, carrera, materia, semestre, tipo)" },
+    { m:"GET",    p:"/api/v1/repositorio/{id}",          d:"Ficha pública (sin calificación, observaciones ni historial)" },
   ]},
   { group:"Documentos — work-service :8084", color:"#92400E", endpoints:[
     { m:"POST",   p:"/api/v1/trabajos/{id}/documentos",  d:"Subir archivo (multipart; tipo real + tamaño; 429 por minuto)" },
@@ -446,8 +447,8 @@ const SPRINTS = [
       "✅ API REST: /trabajos (crear, mios, revision, detalle, editar, eliminar, enviar, revisar, aprobar, rechazar), /documentos (subir, enlace, quitar, descarga, reglas)",
       "✅ Módulo Angular Estudiante: mis trabajos, crear/editar, carga múltiple de documentos por fase con progreso",
       "✅ Módulo Angular Docente: bandeja de revisión, tomar revisión, aprobar/observaciones/rechazar",
-      "⏳ Módulo Angular Repositorio: búsqueda (solo EVALUADOS), detalle público (CU11)",
-      "⏳ Regla visibilidad: trabajos no EVALUADOS ocultos en búsqueda pública",
+      "🚧 Módulo Angular Repositorio: /repositorio (búsqueda simple + filtros, solo EVALUADOS) y ficha /repositorio/:id (CU11 básico; full-text y anónimo en S4)",
+      "🚧 Regla visibilidad: solo EVALUADOS en el repositorio; sin calificación ni observaciones en la ficha pública",
       "✅ Rate limiting Redis en uploads: work:rate:upload:{idUsuario} ventana 60 s, WORK_GROUP.UPLOADS_POR_MINUTO → 429",
       "➖ Cola Redis de uploads: diferida (los archivos no pasan por Redis; streaming directo a MinIO)",
       "✅ Notificaciones al cambiar estado (TRABAJO_ENVIADO a docentes; EN_REVISION / APROBADO / CON_OBSERVACIONES / RECHAZADO a autores)",
