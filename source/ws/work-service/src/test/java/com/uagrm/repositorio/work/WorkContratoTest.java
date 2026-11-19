@@ -51,6 +51,7 @@ import com.uagrm.repositorio.work.controller.DocumentoController;
 import com.uagrm.repositorio.work.controller.PublicoController;
 import com.uagrm.repositorio.work.controller.RepositorioController;
 import com.uagrm.repositorio.work.controller.TrabajoController;
+import com.uagrm.repositorio.mockup.SeguridadHttpMock;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -670,5 +671,38 @@ class WorkContratoTest {
 
     private static ResultMatcher cumpleContratoSoloRespuesta() {
         return OpenApiValidationMatchers.openApi().isValid(SOLO_RESPUESTA);
+    }
+
+    // ---------- hardening HTTP (S5): cabeceras de seguridad, CORS y 500 sin detalles ----------
+
+    @Test
+    void cabecerasDeSeguridadEnRespuestas200y401() throws Exception {
+        // La descarga de un archivo privado tambien es no-store, y el frontend puede leer Content-Disposition
+        byte[] pdf = "%PDF-1.4 contenido".getBytes(StandardCharsets.US_ASCII);
+        when(documentoService.descargar(any(), eq(70))).thenReturn(new DescargaArchivo("final.pdf",
+                "application/pdf", pdf.length, new ByteArrayInputStream(pdf)));
+        mvc.perform(get("/api/v1/documentos/70/descarga").header("Authorization", docente())
+                        .header("Origin", SeguridadHttpMock.ORIGEN_PERMITIDO).accept(MediaType.ALL))
+                .andExpect(status().isOk())
+                .andExpect(SeguridadHttpMock.corsExponeSoloLoNecesario())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+        llamar(get("/api/v1/trabajos/mios"), null, null)
+                .andExpect(status().isUnauthorized())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+    }
+
+    @Test
+    void preflightCorsSoloDesdeElOrigenDelFrontend() throws Exception {
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/trabajos/7", SeguridadHttpMock.ORIGEN_PERMITIDO, "PUT"))
+                .andExpect(SeguridadHttpMock.preflightPermitido());
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/trabajos/7", SeguridadHttpMock.ORIGEN_AJENO, "PUT"))
+                .andExpect(SeguridadHttpMock.preflightRechazado());
+    }
+
+    @Test
+    void errorInesperadoNoExponeMensajesNiTrazas() throws Exception {
+        when(documentoService.descargar(any(), eq(72))).thenThrow(new IllegalStateException(SeguridadHttpMock.MENSAJE_INTERNO));
+        llamar(get("/api/v1/documentos/72/descarga"), docente(), null)
+                .andExpect(SeguridadHttpMock.error500SinDetallesInternos());
     }
 }

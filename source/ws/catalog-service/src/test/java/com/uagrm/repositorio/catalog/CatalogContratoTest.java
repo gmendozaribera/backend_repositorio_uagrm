@@ -47,6 +47,7 @@ import com.uagrm.repositorio.imp.service.catalogo.TipoTrabajoService;
 import com.uagrm.repositorio.mockup.CatalogoMock;
 import com.uagrm.repositorio.mockup.ConfigFacultadMock;
 import com.uagrm.repositorio.mockup.UsuarioMock;
+import com.uagrm.repositorio.mockup.SeguridadHttpMock;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -479,5 +480,33 @@ class CatalogContratoTest {
 
     private static ResultMatcher cumpleContratoSoloRespuesta() {
         return OpenApiValidationMatchers.openApi().isValid(SOLO_RESPUESTA);
+    }
+
+    // ---------- hardening HTTP (S5): cabeceras de seguridad, CORS y 500 sin detalles ----------
+
+    @Test
+    void cabecerasDeSeguridadEnRespuestas200y401() throws Exception {
+        when(configFacultadService.obtener(1)).thenReturn(ConfigFacultadMock.porDefecto(1));
+        llamar(get("/api/v1/facultades/1/config"), estudiante(), null)
+                .andExpect(status().isOk())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+        llamar(get("/api/v1/facultades/1/config"), null, null)
+                .andExpect(status().isUnauthorized())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+    }
+
+    @Test
+    void preflightCorsSoloDesdeElOrigenDelFrontend() throws Exception {
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/facultades/1/config", SeguridadHttpMock.ORIGEN_PERMITIDO, "PUT"))
+                .andExpect(SeguridadHttpMock.preflightPermitido());
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/facultades/1/config", SeguridadHttpMock.ORIGEN_AJENO, "PUT"))
+                .andExpect(SeguridadHttpMock.preflightRechazado());
+    }
+
+    @Test
+    void errorInesperadoNoExponeMensajesNiTrazas() throws Exception {
+        when(configFacultadService.obtener(2)).thenThrow(new IllegalStateException(SeguridadHttpMock.MENSAJE_INTERNO));
+        llamar(get("/api/v1/facultades/2/config"), estudiante(), null)
+                .andExpect(SeguridadHttpMock.error500SinDetallesInternos());
     }
 }

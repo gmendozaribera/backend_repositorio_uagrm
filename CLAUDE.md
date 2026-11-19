@@ -22,7 +22,7 @@ El `java` del PATH es 1.8; Gradle necesita el JDK 25:
 export JAVA_HOME="$HOME/.jdks/openjdk-25.0.2"
 docker compose -f docker-compose/dev/docker-compose.yml up -d      # PostgreSQL 15, Redis 7, MinIO
 ./gradlew build                                                    # compila + tests
-SPRING_PROFILES_ACTIVE=dev ./gradlew :auth-service:bootRun         # :8081, admin / Admin2026. (aplica Flyway)
+SPRING_PROFILES_ACTIVE=dev ./gradlew :auth-service:bootRun         # :8081, admin / Admin2026. (aplica Flyway; TOTP_CIFRADO_KEY)
 SPRING_PROFILES_ACTIVE=dev ./gradlew :catalog-service:bootRun      # :8082, arrancar DESPUES de auth-service
 SPRING_PROFILES_ACTIVE=dev ./gradlew :user-service:bootRun         # :8083, arrancar DESPUES de auth-service
 SPRING_PROFILES_ACTIVE=dev ./gradlew :work-service:bootRun         # :8084, DESPUES de auth-service; usa MinIO
@@ -65,6 +65,19 @@ el bucket se crea solo). Implementa `imp.almacenamiento.AlmacenamientoArchivos` 
 cliente de MinIO). Keys `trabajos/{idTrabajo}/{uuid}.{ext}`; descargas siempre por proxy del servicio.
 Multipart hasta 101 MB (`MULTIPART_MAX_FILE`); los limites reales: `WORK_GROUP.VIDEO_MAX_MB` y
 `ConfigFacultad.tamanoMaxArchivoMB`. `MinioAlmacenamientoTest` usa Testcontainers (se salta sin Docker).
+
+Seguridad HTTP (S5, `imp.security.CabecerasSeguridad` + `SeguridadConfig`): todo `SecurityFilterChain` nuevo debe
+aplicar `.cors(corsConfigurationSource)` y `.headers(cabeceras.api())` (la cadena de Swagger UI usa `swaggerUi()`, con
+su propia CSP). Cabeceras: `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`
+(si el controller no puso otra), CSP `default-src 'none'; frame-ancestors 'none'`; HSTS solo con
+`SEGURIDAD_HSTS_ENABLED=true` (default false: en prod lo pone el Ingress con TLS). CORS igual en los 5 servicios
+(`CORS_ORIGENES`, sin credenciales, expone solo `Retry-After` y `Content-Disposition`). CSRF apagado (JWT en
+Authorization, sin cookies). Actuator: solo `health` (+ liveness/readiness), sin detalles. `server.error.*` nunca
+incluye trazas ni mensajes. Los tests usan `mockup.SeguridadHttpMock` (cabeceras, preflight, 500 sin detalles).
+Secreto TOTP (`usuario.totp_secret`): cifrado AES-GCM `v1:...` (`imp.security.CifradorTotp`, base comun
+`CifradorAesGcm` con `CifradorDominio`) con `TOTP_CIFRADO_KEY` (Base64 32 bytes; solo auth-service, obligatoria fuera
+de dev). auth-service cifra al arrancar los secretos que sigan en claro (`MigracionTotpService`, idempotente).
+Nunca loguear tokens, contrasenas, secretos (ni cifrados) ni cuerpos de webhooks.
 
 ## Estructura
 - `source/dao` — entidades JPA, repositorios, migraciones Flyway (`src/main/resources/db/migration`)

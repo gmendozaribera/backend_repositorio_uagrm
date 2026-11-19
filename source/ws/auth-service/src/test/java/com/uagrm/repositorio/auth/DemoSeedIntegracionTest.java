@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @SpringBootTest(properties = {
         "app.seguridad.jwt.secreto=c2VjcmV0by1zb2xvLXBhcmEtdGVzdHMtZGUtY29udHJhdG8tMzJieXRlcw==",
+        "app.seguridad.totp-cifrado-key=ZGV2LXNvbG8tY2lmcmFkby10b3RwLWF1dGgtMzJieXQ=",
         "app.admin-inicial.habilitado=true",
         "app.admin-inicial.password=Admin2026.",
         "app.swagger-ui.enabled=false"

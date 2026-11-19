@@ -1,5 +1,6 @@
 package com.uagrm.repositorio.imp.config;
 
+import com.uagrm.repositorio.imp.security.CabecerasSeguridad;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -85,7 +86,8 @@ public class SwaggerUiConfig implements WebMvcConfigurer {
      * El contrato de este servicio (y solo ese): ruta exacta, el nombre no sale de la URL. Ademas reemplaza el
      * swagger-initializer.js del webjar (que apunta al ejemplo petstore) por uno que carga el contrato. Las
      * RouterFunction se resuelven antes que los recursos estaticos. URL relativa: funciona detras de un proxy con
-     * prefijo.
+     * prefijo. {@code validatorUrl: null}: la UI no llama a validator.swagger.io (la CSP solo permite el mismo
+     * servidor y el contrato no tiene por que salir a un tercero).
      */
     @Bean
     RouterFunction<ServerResponse> swaggerUiRutas() {
@@ -102,6 +104,7 @@ public class SwaggerUiConfig implements WebMvcConfigurer {
                     deepLinking: true,
                     presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
                     plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+                    validatorUrl: null,
                     layout: 'StandaloneLayout'
                   });
                 };
@@ -115,16 +118,22 @@ public class SwaggerUiConfig implements WebMvcConfigurer {
                 .build();
     }
 
-    /** Cadena propia, evaluada antes que la del servicio: solo GET de la UI y del contrato, sin token. */
+    /**
+     * Cadena propia, evaluada antes que la del servicio: solo GET de la UI y del contrato, sin token. Mismas cabeceras
+     * de seguridad que la API salvo la CSP: la UI es una pagina y necesita cargar sus scripts, estilos e imagenes
+     * (todo del mismo servidor; ver {@link CabecerasSeguridad#CSP_SWAGGER_UI}).
+     */
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
-    SecurityFilterChain swaggerUiFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain swaggerUiFilterChain(HttpSecurity http, CabecerasSeguridad cabeceras) throws Exception {
         List<RequestMatcher> rutas = List.of("/swagger-ui.html", "/swagger-ui", "/swagger-ui/**", "/openapi/" + contrato)
                 .stream()
                 .map(ruta -> (RequestMatcher) PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ruta))
                 .toList();
         http.securityMatcher(new OrRequestMatcher(rutas))
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+                .headers(cabeceras.swaggerUi())
+                // Solo GET de archivos estaticos, sin cookies ni sesion: no hay CSRF que proteger
                 .csrf(AbstractHttpConfigurer::disable)
                 .requestCache(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS));

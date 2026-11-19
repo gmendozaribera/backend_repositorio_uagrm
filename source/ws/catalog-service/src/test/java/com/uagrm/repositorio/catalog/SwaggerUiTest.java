@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -12,6 +13,7 @@ import com.uagrm.repositorio.catalog.controller.FacultadController;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
 import com.uagrm.repositorio.imp.config.SwaggerUiConfig;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
+import com.uagrm.repositorio.imp.security.CabecerasSeguridad;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import com.uagrm.repositorio.imp.service.catalogo.FacultadService;
@@ -26,7 +28,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Swagger UI con el contrato (imp SwaggerUiConfig): apagado por defecto (las rutas caen en el denyAll del servicio)
- * y, encendido, publica solo el YAML de este servicio y los archivos de la UI, sin token.
+ * y, encendido, publica solo el YAML de este servicio y los archivos de la UI, sin token. Tambien las cabeceras de
+ * seguridad propias de la UI (CSP compatible) y HSTS cuando se enciende.
  */
 class SwaggerUiTest {
 
@@ -84,6 +87,34 @@ class SwaggerUiTest {
         @Test
         void laApiSigueExigiendoToken() throws Exception {
             mvc.perform(get("/api/v1/facultades/1/config")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        void laUiTieneSuPropiaCspYLaApiLaEstricta() throws Exception {
+            mvc.perform(get("/swagger-ui/index.html"))
+                    .andExpect(header().string("Content-Security-Policy", CabecerasSeguridad.CSP_SWAGGER_UI))
+                    .andExpect(header().string("X-Frame-Options", "DENY"))
+                    .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                    .andExpect(header().string("Referrer-Policy", "no-referrer"));
+            mvc.perform(get("/openapi/catalog-api.yaml"))
+                    .andExpect(header().string("Content-Security-Policy", CabecerasSeguridad.CSP_SWAGGER_UI));
+            mvc.perform(get("/api/v1/facultades/1/config"))
+                    .andExpect(header().string("Content-Security-Policy", CabecerasSeguridad.CSP_API));
+        }
+    }
+
+    /** HSTS encendido (SEGURIDAD_HSTS_ENABLED=true): en toda respuesta, API y Swagger UI. */
+    @Nested
+    @TestPropertySource(properties = {"app.swagger-ui.enabled=true", "app.seguridad.hsts-enabled=true"})
+    class ConHsts extends Base {
+
+        @Test
+        void hstsDeUnAnoConSubdominios() throws Exception {
+            String hsts = "max-age=31536000; includeSubDomains";
+            mvc.perform(get("/api/v1/facultades/1/config"))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(header().string("Strict-Transport-Security", hsts));
+            mvc.perform(get("/swagger-ui/index.html")).andExpect(header().string("Strict-Transport-Security", hsts));
         }
     }
 

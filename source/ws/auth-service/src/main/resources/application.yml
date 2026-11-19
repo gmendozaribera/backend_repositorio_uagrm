@@ -3,6 +3,15 @@
 # Para desarrollo local: SPRING_PROFILES_ACTIVE=dev (ver application-dev.yml).
 server:
   port: ${SERVER_PORT:8081}
+  # Cabeceras de hasta 8 KB (default de Tomcat, explicito): un JWT ocupa ~0.5 KB. Mas grande -> 400.
+  max-http-request-header-size: 8KB
+  # Errores que no pasan por GlobalExceptionHandler (p. ej. el /error del contenedor): nunca trazas, mensajes de
+  # excepciones ni detalles de binding. Los ProblemDetail propios ya llevan un detail pensado para el usuario.
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
   # Detras de nginx: Tomcat (RemoteIpValve) toma la IP real del cliente de X-Forwarded-For, pero SOLO si el request
   # llega desde una IP interna/privada (10.x, 172.16-31.x, 192.168.x, 127.x, ::1...). Un cliente externo no puede
   # falsificar su IP enviando la cabecera. La usa el limite de intentos fallidos (auth:rate:*:{ip}).
@@ -57,7 +66,12 @@ app:
       emisor: Repositorio UAGRM
       ttl-pendiente: 300s
       max-intentos: 5
-    cors-origenes: ${CORS_ORIGENES:http://localhost:4200}
+    cors-origenes: ${CORS_ORIGENES:http://localhost:4200}   # mismos origenes en los 5 servicios
+    # HSTS (Strict-Transport-Security). Apagado: en produccion lo pone el Ingress con TLS. Ver imp CabecerasSeguridad.
+    hsts-enabled: ${SEGURIDAD_HSTS_ENABLED:false}
+    # Llave AES-256 del secreto TOTP (usuario.totp_secret). OBLIGATORIA: Base64 de 32 bytes (openssl rand -base64 32).
+    # Solo auth-service la recibe. Nunca en el repo (el valor de dev esta en application-dev.yml).
+    totp-cifrado-key: ${TOTP_CIFRADO_KEY:}
 
   # Tabla de dominio (LOGIN_INTENTOS, LOGIN_WAITING...): HASH config:dominio:{GRUPO}
   dominio:
@@ -81,12 +95,16 @@ app:
     correo: ${ADMIN_INICIAL_CORREO:admin@uagrm.edu.bo}
     ci: ${ADMIN_INICIAL_CI:1}
 
+# Actuator: SOLO health (y sus grupos liveness/readiness para Kubernetes). Sin detalles ni componentes: un anonimo
+# solo ve {"status":"UP"} (no versiones, ni la BD, ni Redis, ni MinIO).
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health
   endpoint:
     health:
+      show-details: never
+      show-components: never
       probes:
         enabled: true   # /actuator/health/liveness y /readiness para Kubernetes

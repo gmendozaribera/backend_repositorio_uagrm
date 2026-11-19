@@ -7,6 +7,7 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientResponseException;
 
 /**
  * Envia un analisis al motor configurado (lo llama el job de Quartz, fuera de la transaccion HTTP).
@@ -34,8 +35,19 @@ public class ProcesadorPlagio {
             motor.enviar(solicitud.get());
         } catch (RuntimeException ex) {
             log.error("Fallo el envio del analisis {} al motor {}: {} {}", idAnalisis, motor.tipo(),
-                    ex.getClass().getSimpleName(), ex.getMessage());
+                    ex.getClass().getSimpleName(), motivo(ex));
             plagioService.fallar(idAnalisis, PlagioService.MENSAJE_ENVIO);
         }
+    }
+
+    /**
+     * Si Copyleaks respondio con error, solo el codigo HTTP: el mensaje de RestClient incluye el cuerpo de la
+     * respuesta, que podria repetir lo que se envio (p. ej. la URL del webhook, que lleva el token secreto).
+     */
+    static String motivo(RuntimeException ex) {
+        if (ex instanceof RestClientResponseException respuesta) {
+            return "HTTP " + respuesta.getStatusCode().value();
+        }
+        return ex.getMessage();
     }
 }

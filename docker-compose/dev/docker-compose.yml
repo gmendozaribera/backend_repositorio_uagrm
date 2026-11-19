@@ -56,6 +56,8 @@ services:
       DB_USERNAME: ${POSTGRES_USER:-repositorio}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-repositorio}
       ADMIN_INICIAL_PASSWORD: ${ADMIN_INICIAL_PASSWORD:-Admin2026.}
+      # Llave AES del secreto TOTP (2FA). Solo la recibe auth-service.
+      TOTP_CIFRADO_KEY: ${TOTP_CIFRADO_KEY:-ZGV2LXNvbG8tY2lmcmFkby10b3RwLWF1dGgtMzJieXQ=}
       SPRING_PROFILES_ACTIVE: dev
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_dev_password}

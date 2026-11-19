@@ -3,6 +3,7 @@ package com.uagrm.repositorio.work.config;
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.imp.redis.LimitePublicoService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
+import com.uagrm.repositorio.imp.security.CabecerasSeguridad;
 import com.uagrm.repositorio.imp.security.RevocacionTokenFilter;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import java.util.Arrays;
@@ -51,17 +52,24 @@ public class SecurityConfig {
                                             CorsConfigurationSource corsConfigurationSource,
                                             RevocacionTokenService revocacionTokenService,
                                             LimitePublicoService limitePublico,
-                                            SeguridadErrorHandler errores) throws Exception {
+                                            SeguridadErrorHandler errores,
+                                            CabecerasSeguridad cabeceras) throws Exception {
         String estudiante = TipoUsuario.ESTUDIANTE;
         String docente = TipoUsuario.DOCENTE;
         String admin = TipoUsuario.ADMIN;
         http
-                // API stateless con JWT en el header Authorization: sin cookies no hay CSRF que proteger
+                // CSRF apagado A PROPOSITO, y es seguro: CSRF es el ataque en que otra pagina hace que el navegador
+                // envie una peticion "con la sesion del usuario" porque el navegador adjunta solo las cookies. Aqui
+                // no hay cookies ni sesion: el JWT viaja en la cabecera Authorization, que solo agrega el codigo del
+                // frontend; una pagina ajena no puede ponerla (y CORS le impide leer la respuesta).
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                // nosniff, DENY, no-referrer, no-store, CSP y HSTS (si SEGURIDAD_HSTS_ENABLED): ver CabecerasSeguridad
+                .headers(cabeceras.api())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health/**", "/actuator/info", "/error").permitAll()
+                        // Actuator: solo health (liveness/readiness de Kubernetes), sin detalles
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
                         // Orden importa: la primera regla que coincide gana (/mios y /revision antes de /{id})
                         .requestMatchers(HttpMethod.GET, "/api/v1/trabajos/mios").hasRole(estudiante)
                         .requestMatchers(HttpMethod.GET, "/api/v1/trabajos/revision").hasAnyRole(docente, admin)

@@ -2,6 +2,7 @@ package com.uagrm.repositorio.auth.config;
 
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
+import com.uagrm.repositorio.imp.security.CabecerasSeguridad;
 import com.uagrm.repositorio.imp.security.RevocacionTokenFilter;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
 import org.springframework.context.annotation.Bean;
@@ -25,11 +26,17 @@ public class SecurityConfig {
                                             JwtAuthenticationConverter jwtAuthenticationConverter,
                                             CorsConfigurationSource corsConfigurationSource,
                                             RevocacionTokenService revocacionTokenService,
-                                            SeguridadErrorHandler errores) throws Exception {
+                                            SeguridadErrorHandler errores,
+                                            CabecerasSeguridad cabeceras) throws Exception {
         http
-                // API stateless con JWT en el header Authorization: sin cookies no hay CSRF que proteger
+                // CSRF apagado A PROPOSITO, y es seguro: CSRF es el ataque en que otra pagina hace que el navegador
+                // envie una peticion "con la sesion del usuario" porque el navegador adjunta solo las cookies. Aqui
+                // no hay cookies ni sesion: el JWT viaja en la cabecera Authorization, que solo agrega el codigo del
+                // frontend; una pagina ajena no puede ponerla (y CORS le impide leer la respuesta).
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                // nosniff, DENY, no-referrer, no-store, CSP y HSTS (si SEGURIDAD_HSTS_ENABLED): ver CabecerasSeguridad
+                .headers(cabeceras.api())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST,
@@ -37,7 +44,8 @@ public class SecurityConfig {
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/refresh",
                                 "/api/v1/auth/2fa/verify").permitAll()
-                        .requestMatchers("/actuator/health/**", "/actuator/info", "/error").permitAll()
+                        // Actuator: solo health (liveness/readiness de Kubernetes), sin detalles
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
                         // Unicos endpoints permitidos a quien aun tiene la password_default
                         .requestMatchers(HttpMethod.POST,
                                 "/api/v1/auth/password/change",

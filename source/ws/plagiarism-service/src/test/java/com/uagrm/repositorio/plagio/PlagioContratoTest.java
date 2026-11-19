@@ -33,6 +33,7 @@ import com.uagrm.repositorio.plagio.config.SecurityConfig;
 import com.uagrm.repositorio.plagio.controller.PlagioController;
 import com.uagrm.repositorio.plagio.controller.WebhookCopyleaksController;
 import com.uagrm.repositorio.plagio.copyleaks.WebhookCopyleaksService;
+import com.uagrm.repositorio.mockup.SeguridadHttpMock;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -270,5 +271,33 @@ class PlagioContratoTest {
 
     private static ResultMatcher cumpleContratoSoloRespuesta() {
         return OpenApiValidationMatchers.openApi().isValid(SOLO_RESPUESTA);
+    }
+
+    // ---------- hardening HTTP (S5): cabeceras de seguridad, CORS y 500 sin detalles ----------
+
+    @Test
+    void cabecerasDeSeguridadEnRespuestas200y401() throws Exception {
+        when(plagioService.iniciar(any(), eq(7))).thenReturn(PlagioMock.enProcesoResponse());
+        llamar(post("/api/v1/plagio/trabajos/7"), docente())
+                .andExpect(status().isAccepted())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+        llamar(get("/api/v1/plagio/trabajos/7/estado"), null)
+                .andExpect(status().isUnauthorized())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+    }
+
+    @Test
+    void preflightCorsSoloDesdeElOrigenDelFrontend() throws Exception {
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/plagio/trabajos/7", SeguridadHttpMock.ORIGEN_PERMITIDO, "POST"))
+                .andExpect(SeguridadHttpMock.preflightPermitido());
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/plagio/trabajos/7", SeguridadHttpMock.ORIGEN_AJENO, "POST"))
+                .andExpect(SeguridadHttpMock.preflightRechazado());
+    }
+
+    @Test
+    void errorInesperadoNoExponeMensajesNiTrazas() throws Exception {
+        when(plagioService.ultimo(any(), eq(99))).thenThrow(new IllegalStateException(SeguridadHttpMock.MENSAJE_INTERNO));
+        llamar(get("/api/v1/plagio/trabajos/99"), docente())
+                .andExpect(SeguridadHttpMock.error500SinDetallesInternos());
     }
 }

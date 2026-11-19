@@ -1,11 +1,13 @@
 package com.uagrm.repositorio.imp.config;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import com.uagrm.repositorio.imp.security.CabecerasSeguridad;
 import com.uagrm.repositorio.imp.security.JwtService;
 import java.util.Base64;
 import java.util.List;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,7 +31,9 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
  * Beans de seguridad compartidos por todos los microservicios: firma/validacion JWT (HS256),
- * conversion de claims a roles, BCrypt y CORS. Cada microservicio define su propio SecurityFilterChain.
+ * conversion de claims a roles, BCrypt, CORS y cabeceras HTTP de seguridad. Cada microservicio define su propio
+ * SecurityFilterChain (y debe aplicar {@code .cors(...)} con {@link #corsConfigurationSource} y
+ * {@code .headers(cabeceras.api())}).
  */
 @Configuration
 @EnableConfigurationProperties(SeguridadProperties.class)
@@ -84,14 +88,38 @@ public class SeguridadConfig {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Cabeceras de seguridad de todas las respuestas (ver {@link CabecerasSeguridad}). HSTS solo con
+     * {@code app.seguridad.hsts-enabled=true} (SEGURIDAD_HSTS_ENABLED; en produccion lo pone el Ingress con TLS).
+     */
+    @Bean
+    CabecerasSeguridad cabecerasSeguridad(@Value("${app.seguridad.hsts-enabled:false}") boolean hstsActivo) {
+        return new CabecerasSeguridad(hstsActivo);
+    }
+
+    /**
+     * CORS, el mismo en los 5 servicios: solo los origenes de CORS_ORIGENES (el frontend) pueden llamar a la API
+     * desde un navegador. En simple: el navegador pregunta al servidor "esta pagina de tal origen puede leer tus
+     * respuestas?" y solo a esos origenes se les dice que si; cualquier otra pagina queda bloqueada por el propio
+     * navegador.
+     * <ul>
+     *   <li>Metodos y cabeceras: solo los que usa el frontend (Authorization para el JWT y Content-Type).</li>
+     *   <li>allowCredentials=false: no usamos cookies; el token viaja en la cabecera Authorization, que el frontend
+     *       agrega a mano. Asi el navegador nunca adjunta credenciales automaticamente a una peticion cruzada.</li>
+     *   <li>Cabeceras expuestas: Retry-After (429) y Content-Disposition (nombre del archivo en las descargas); las
+     *       demas no son legibles desde JavaScript de otro origen salvo las "seguras" de CORS.</li>
+     *   <li>maxAge 1 h: el navegador recuerda la respuesta del preflight (OPTIONS) y no lo repite en cada request.</li>
+     * </ul>
+     */
     @Bean
     CorsConfigurationSource corsConfigurationSource(SeguridadProperties props) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(props.corsOrigenes());
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        // Retry-After (429 por intentos fallidos) no es una cabecera "segura" de CORS: hay que exponerla
-        config.setExposedHeaders(List.of(HttpHeaders.RETRY_AFTER));
+        // OPTIONS no hace falta: el preflight lo responde el filtro CORS y pregunta por el metodo REAL
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE"));
+        config.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
+        config.setExposedHeaders(List.of(HttpHeaders.RETRY_AFTER, HttpHeaders.CONTENT_DISPOSITION));
+        config.setAllowCredentials(false);
         config.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

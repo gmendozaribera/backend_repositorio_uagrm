@@ -122,8 +122,10 @@ public class ParametrosService {
         }
         Optional<String> error = parametro.validar(valor.get());
         if (error.isPresent()) {
-            log.warn("Valor invalido '{}' en {}.{} ({}); se usa el valor por defecto {}", valor.get(),
-                    parametro.grupo(), parametro.nombre(), error.get(), parametro.porDefecto());
+            // Un parametro secreto nunca se escribe en el log (ni cifrado)
+            log.warn("Valor invalido '{}' en {}.{} ({}); se usa el valor por defecto {}",
+                    parametro.secreto() ? "***" : valor.get(), parametro.grupo(), parametro.nombre(), error.get(),
+                    parametro.porDefecto());
             return parametro.porDefecto();
         }
         return valor.get();

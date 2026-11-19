@@ -57,6 +57,7 @@ import com.uagrm.repositorio.user.controller.PadronController;
 import com.uagrm.repositorio.user.controller.PerfilController;
 import com.uagrm.repositorio.user.controller.TipoUsuarioController;
 import com.uagrm.repositorio.user.controller.UsuarioController;
+import com.uagrm.repositorio.mockup.SeguridadHttpMock;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -665,5 +666,35 @@ class UserContratoTest {
 
     private static ResultMatcher cumpleContratoSoloRespuesta() {
         return OpenApiValidationMatchers.openApi().isValid(SOLO_RESPUESTA);
+    }
+
+    // ---------- hardening HTTP (S5): cabeceras de seguridad, CORS y 500 sin detalles ----------
+
+    @Test
+    void cabecerasDeSeguridadEnRespuestas200y401() throws Exception {
+        when(usuarioService.listar(any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                .thenReturn(new PaginaResponse<>(List.of(PadronMock.docenteResponse()), 0, 20, 1, 1));
+        llamar(get("/api/v1/usuarios"), admin(), null)
+                .andExpect(status().isOk())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+        llamar(get("/api/v1/usuarios"), null, null)
+                .andExpect(status().isUnauthorized())
+                .andExpect(SeguridadHttpMock.cabecerasApi());
+    }
+
+    @Test
+    void preflightCorsSoloDesdeElOrigenDelFrontend() throws Exception {
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/usuarios", SeguridadHttpMock.ORIGEN_PERMITIDO, "POST"))
+                .andExpect(SeguridadHttpMock.preflightPermitido());
+        mvc.perform(SeguridadHttpMock.preflight("/api/v1/usuarios", SeguridadHttpMock.ORIGEN_AJENO, "POST"))
+                .andExpect(SeguridadHttpMock.preflightRechazado());
+    }
+
+    @Test
+    void errorInesperadoNoExponeMensajesNiTrazas() throws Exception {
+        when(usuarioService.listar(any(), any(), any(), anyBoolean(), anyInt(), anyInt()))
+                .thenThrow(new IllegalStateException(SeguridadHttpMock.MENSAJE_INTERNO));
+        llamar(get("/api/v1/usuarios"), admin(), null)
+                .andExpect(SeguridadHttpMock.error500SinDetallesInternos());
     }
 }

@@ -33,7 +33,8 @@ public class DosFactoresService {
             throw NegocioException.conflicto("La verificacion en dos pasos ya esta activada.");
         }
         String secreto = totpService.generarSecreto();
-        usuario.setTotpSecret(secreto);
+        // En la BD solo el secreto cifrado (v1:...); al usuario se le muestra en claro UNA vez para su app
+        usuario.setTotpSecret(totpService.cifrar(secreto));
         usuarioRepository.save(usuario);
 
         QrData qr = totpService.datosQr(secreto, usuario.getUsuario());

@@ -7,4 +7,9 @@ dependencies {
     api 'org.springframework:spring-test'
     api 'org.testcontainers:testcontainers-junit-jupiter'
     api 'org.testcontainers:testcontainers-postgresql'
+
+    // SeguridadHttpMock (ResultMatcher de MockMvc): los modulos de test ya traen ambos (spring-boot-starter-test y
+    // el starter web); aqui solo hacen falta para compilar
+    compileOnly 'jakarta.servlet:jakarta.servlet-api'
+    compileOnly 'org.hamcrest:hamcrest'
 }

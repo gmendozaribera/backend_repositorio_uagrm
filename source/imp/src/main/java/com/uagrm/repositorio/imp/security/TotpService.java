@@ -15,7 +15,13 @@ import dev.samstevens.totp.time.SystemTimeProvider;
 import dev.samstevens.totp.util.Utils;
 import org.springframework.stereotype.Service;
 
-/** TOTP RFC 6238 compatible con Google Authenticator: SHA1, 6 digitos, periodo de 30 s. */
+/**
+ * TOTP RFC 6238 compatible con Google Authenticator: SHA1, 6 digitos, periodo de 30 s.
+ *
+ * <p>El secreto se guarda CIFRADO en la BD ({@link CifradorTotp}, {@code v1:...}): {@link #cifrar} antes de guardar
+ * y {@link #esValido} lo descifra solo en memoria para verificar el codigo. Un secreto en claro (anterior al
+ * cifrado) lo convierte auth-service al arrancar; si quedara alguno, la verificacion falla (fail-closed).</p>
+ */
 @Service
 public class TotpService {
 
@@ -26,9 +32,11 @@ public class TotpService {
     private final QrGenerator qrGenerator = new ZxingPngQrGenerator();
     private final CodeVerifier codeVerifier;
     private final SeguridadProperties props;
+    private final CifradorTotp cifrador;
 
-    public TotpService(SeguridadProperties props) {
+    public TotpService(SeguridadProperties props, CifradorTotp cifrador) {
         this.props = props;
+        this.cifrador = cifrador;
         DefaultCodeVerifier verifier = new DefaultCodeVerifier(new DefaultCodeGenerator(), new SystemTimeProvider());
         verifier.setTimePeriod(PERIODO_SEGUNDOS);
         verifier.setAllowedTimePeriodDiscrepancy(1); // tolera ±30 s de desfase de reloj del celular
@@ -58,7 +66,20 @@ public class TotpService {
         }
     }
 
-    public boolean esValido(String secreto, String codigo) {
-        return secreto != null && codeVerifier.isValidCode(secreto, codigo);
+    /** Secreto en claro (recien generado) → formato guardado {@code v1:...}. */
+    public String cifrar(String secreto) {
+        return cifrador.cifrar(secreto);
+    }
+
+    /**
+     * @param secretoGuardado el valor de la BD ({@code v1:...}); null = el usuario no tiene 2FA
+     * @throws IllegalStateException si no se puede descifrar (llave incorrecta, dato alterado o en claro): es un
+     *                               problema del servidor (500), nunca se acepta el codigo
+     */
+    public boolean esValido(String secretoGuardado, String codigo) {
+        if (secretoGuardado == null || secretoGuardado.isEmpty()) {
+            return false;
+        }
+        return codeVerifier.isValidCode(cifrador.descifrar(secretoGuardado), codigo);
     }
 }

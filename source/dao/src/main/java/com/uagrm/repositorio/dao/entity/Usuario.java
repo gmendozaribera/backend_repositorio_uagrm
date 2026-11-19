@@ -48,8 +48,9 @@ public class Usuario {
     @Column(nullable = false)
     private Boolean twoFactorEnabled = Boolean.FALSE;
 
-    @Size(max = 64)
-    @Column(length = 64)
+    /** Secreto TOTP CIFRADO ({@code v1:...}, AES-GCM con TOTP_CIFRADO_KEY): ver imp CifradorTotp. */
+    @Size(max = 128)
+    @Column(length = 128)
     private String totpSecret;
 
     @NotNull

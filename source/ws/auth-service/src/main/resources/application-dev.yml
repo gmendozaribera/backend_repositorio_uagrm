@@ -11,6 +11,9 @@ app:
     jwt:
       # Secreto SOLO de desarrollo. En Kubernetes llega por Secret (JWT_SECRET).
       secreto: ${JWT_SECRET:ZGV2LXNvbG8tcGFyYS1kZXNhcnJvbGxvLWNhbWJpYXItZW4tcHJvZHVjY2lvbiE=}
+    # Llave de cifrado del secreto TOTP SOLO de desarrollo ("dev-solo-cifrado-totp-auth-32byt").
+    # En Kubernetes llega por Secret (TOTP_CIFRADO_KEY).
+    totp-cifrado-key: ${TOTP_CIFRADO_KEY:ZGV2LXNvbG8tY2lmcmFkby10b3RwLWF1dGgtMzJieXQ=}
   admin-inicial:
     habilitado: true
     password: ${ADMIN_INICIAL_PASSWORD:Admin2026.}
