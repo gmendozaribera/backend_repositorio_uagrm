@@ -7,6 +7,9 @@ description = 'work-service :8084 — trabajos academicos, revision y documentos
 dependencies {
     implementation project(':imp')
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Swagger UI con el CONTRATO (spec/openapi), apagado por defecto: ver imp SwaggerUiConfig
+    runtimeOnly project(':spec')
+    runtimeOnly "org.webjars:swagger-ui:${swaggerUiVersion}"
     // Cliente oficial de MinIO (S3): solo este servicio guarda archivos
     implementation "io.minio:minio:${minioVersion}"
     // Sin Flyway a proposito: las migraciones (source/dao) las aplica solo auth-service.

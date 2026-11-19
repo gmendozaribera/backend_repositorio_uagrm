@@ -5,6 +5,8 @@ spring:
       password: ${REDIS_PASSWORD:redis_dev_password}
 
 app:
+  swagger-ui:
+    enabled: ${SWAGGER_UI_ENABLED:true}   # /swagger-ui.html
   seguridad:
     jwt:
       # Secreto SOLO de desarrollo, el mismo que application-dev.yml de auth-service.

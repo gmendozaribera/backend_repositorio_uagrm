@@ -28,6 +28,24 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew :user-service:bootRun         # :8083, arra
 SPRING_PROFILES_ACTIVE=dev ./gradlew :work-service:bootRun         # :8084, DESPUES de auth-service; usa MinIO
 SPRING_PROFILES_ACTIVE=dev ./gradlew :plagiarism-service:bootRun   # :8085, DESPUES de auth-service; motor SIMULADO
 ```
+**Demo FICCT** (presentaciones y E2E del frontend): `SPRING_PROFILES_ACTIVE=dev,demo ./gradlew :auth-service:bootRun`
+(solo auth-service lleva el perfil; los demas servicios con `dev`). Agrega a Flyway `classpath:db/demo`
+(`source/ws/auth-service/src/main/resources/db/demo/R__demo_ficct.sql`: repetible e idempotente, se aplica despues de
+todas las V y se puede volver a arrancar sin `demo`: `ignore-migration-patterns: repeatable:missing`). Datos: FICCT
+(acceso externo, escala 100, 10 MB), INF/SIS/RED, INF412/INF422/INF312, semestre 2-2026, grupos INF412-SA/SB e
+INF312-SA, fases Perfil/Avance/Final, tipos "Proyecto de materia"/"Monografia", un trabajo EVALUADO (enlace GitHub).
+Usuarios (`Demo2026!`): `doc.maria` (Admin de Curso INF412-SA e INF312-SA), `doc.jose` (docente INF412-SA),
+`219000001` (Juan, INF), `219000002` (Ana, SIS). Padron sin cuenta: `219000003` / CI `7000003` (password `Uagrm2026`).
+`DemoUsuariosListener` (perfil demo, al arrancar): admin y usuarios demo sin cambio de contrasena obligatorio ni 2FA
+(no toca contrasenas) y limpia las caches Redis de catalogos y config de FICCT. NUNCA en prod ni en tests normales
+(solo `DemoSeedIntegracionTest` lo activa para probar el seed).
+
+**Swagger UI** (contrato, no generado): `http://localhost:808x/swagger-ui.html` -> carga `/openapi/<servicio>-api.yaml`
+(el YAML de `source/spec`, solo el del servicio). Apagado por defecto; `SWAGGER_UI_ENABLED=true` lo enciende (perfil
+dev: encendido). Implementado en imp `SwaggerUiConfig` con el webjar `org.webjars:swagger-ui` (springdoc apaga su UI
+con `api-docs.enabled=false`); con el flag apagado esas rutas caen en el `denyAll` de cada servicio (401). Encendido,
+una `SecurityFilterChain` propia (orden mas alto) permite solo GET de la UI y del YAML; la API sigue pidiendo token.
+
 Migraciones: viven en `source/dao` y las aplica SOLO auth-service; los demas servicios no traen Flyway y
 validan el esquema (`ddl-auto: validate`). En docker-compose, catalog-, user-, work- y plagiarism-service esperan el
 healthcheck de auth-service.
@@ -85,8 +103,13 @@ Todo cambio de API empieza editando el YAML; después el código.
 5. Flyway para todo cambio de esquema; `ddl-auto: validate`.
 6. Redis con TTL explícito siempre. Auth es fail-closed (503 si Redis cae); catálogos degradan a PostgreSQL; uploads 503.
 7. Éxito: `ApiResponse { data, message, status, timestamp }`. Error: `ProblemDetail` (RFC 7807) con `timestamp`.
+   Todo 400 de validacion (body `@Valid`, `@PathVariable`/`@RequestParam` con restricciones, tipo invalido, query
+   obligatorio ausente, `ConstraintViolationException`) sale igual: title "Datos invalidos" + `errores` campo ->
+   mensaje (para parametros, su nombre en la URL). Lo arma `GlobalExceptionHandler`.
 8. CORS solo para el origen del frontend. Config externalizable por variables de entorno (ConfigMap/Secret).
 9. Mínimo un test unitario por servicio; integración con Testcontainers (PostgreSQL, MinIO, Redis) en repos críticos.
+   Base compartida: mockup `integracion.ContenedoresIntegracion` (PostgreSQL 15 + Redis 7, Flyway en el test, se
+   salta sin Docker): `AuthIntegracionTest`, `PadronRegistroIntegracionTest`, `CatalogoCacheIntegracionTest`.
 10. El usuario tiene poca experiencia en seguridad: explicar las decisiones de seguridad en términos simples.
 11. **Todo parámetro configurable del sistema se registra en la tabla `dominio`** (`domain_group`, `domain_name`,
     `domain_value`, `description`) con una migración Flyway que lo siembra, y su grupo/nombre se declaran como

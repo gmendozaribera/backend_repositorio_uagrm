@@ -1,0 +1,7 @@
+# Perfil "demo": datos de ejemplo de la FICCT para presentaciones y los E2E del frontend.
+# Se usa JUNTO con dev: SPRING_PROFILES_ACTIVE=dev,demo. NUNCA en produccion ni en los tests normales.
+# Solo auth-service (el dueno de las migraciones) agrega la carpeta del seed; los demas servicios no cambian.
+spring:
+  flyway:
+    # db/demo: scripts repetibles (R__) e idempotentes que Flyway aplica despues de todas las versionadas
+    locations: classpath:db/migration,classpath:db/demo

@@ -1,4 +1,10 @@
 // Mocks y datos de prueba compartidos entre los tests de los microservicios
 dependencies {
     api project(':dto')
+
+    // Base de los tests de integracion (regla 9): PostgreSQL y Redis reales con Testcontainers. Este modulo solo
+    // se usa como testImplementation, asi que estas dependencias nunca llegan a un jar ejecutable.
+    api 'org.springframework:spring-test'
+    api 'org.testcontainers:testcontainers-junit-jupiter'
+    api 'org.testcontainers:testcontainers-postgresql'
 }

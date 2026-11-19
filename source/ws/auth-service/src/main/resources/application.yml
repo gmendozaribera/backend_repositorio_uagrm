@@ -26,6 +26,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # Una BD que ya recibio el seed del perfil demo (R__ de db/demo) debe poder arrancar sin ese perfil: un
+    # repetible aplicado que no esta en las locations no es error. Las versionadas siguen validandose completas.
+    ignore-migration-patterns: "*:future,repeatable:missing"
 
   data:
     redis:
@@ -41,6 +44,10 @@ spring:
       enabled: true
 
 app:
+  # Swagger UI con el contrato de spec (imp SwaggerUiConfig). Apagado salvo SWAGGER_UI_ENABLED=true; en dev, true.
+  swagger-ui:
+    enabled: ${SWAGGER_UI_ENABLED:false}
+    contrato: auth-api.yaml
   seguridad:
     jwt:
       secreto: ${JWT_SECRET}             # obligatorio: Base64, minimo 32 bytes. Nunca en el repo.

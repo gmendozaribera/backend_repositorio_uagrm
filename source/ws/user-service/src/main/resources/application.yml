@@ -46,6 +46,10 @@ spring:
     job-store-type: memory
 
 app:
+  # Swagger UI con el contrato de spec (imp SwaggerUiConfig). Apagado salvo SWAGGER_UI_ENABLED=true; en dev, true.
+  swagger-ui:
+    enabled: ${SWAGGER_UI_ENABLED:false}
+    contrato: user-api.yaml
   # Mismos valores que auth-service: este servicio valida los tokens que emite auth-service
   # (misma clave HS256 y mismo emisor) y cierra sesiones con la misma revocacion de Redis.
   seguridad:

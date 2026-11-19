@@ -35,6 +35,10 @@ spring:
       enabled: true
 
 app:
+  # Swagger UI con el contrato de spec (imp SwaggerUiConfig). Apagado salvo SWAGGER_UI_ENABLED=true; en dev, true.
+  swagger-ui:
+    enabled: ${SWAGGER_UI_ENABLED:false}
+    contrato: catalog-api.yaml
   # Mismos valores que auth-service: este servicio valida los tokens que emite auth-service
   # (misma clave HS256 y mismo emisor). Los TTL y dos-factores solo los exige la configuracion compartida.
   seguridad:

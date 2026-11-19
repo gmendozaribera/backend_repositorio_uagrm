@@ -42,6 +42,8 @@ subprojects {
         tikaVersion = '3.3.3'
         // Cliente oficial de MinIO (S3), solo en work-service
         minioVersion = '9.0.4'
+        // Swagger UI (webjar oficial) que muestra el contrato de spec; solo se publica con SWAGGER_UI_ENABLED=true
+        swaggerUiVersion = '5.34.0'
     }
 
     dependencies {

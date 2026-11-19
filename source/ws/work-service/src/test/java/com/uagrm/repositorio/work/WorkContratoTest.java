@@ -187,7 +187,7 @@ class WorkContratoTest {
 
         llamar(get("/api/v1/trabajos/mios"), docente(), null).andExpect(status().isForbidden()).andExpect(cumpleContrato());
         llamar(get("/api/v1/trabajos/mios").param("tamano", "101"), estudiante(), null)
-                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errores.tamano").exists()).andExpect(cumpleContratoSoloRespuesta());
     }
 
     @Test
@@ -210,7 +210,7 @@ class WorkContratoTest {
         when(trabajoService.obtener(any(), eq(99))).thenThrow(NegocioException.noEncontrado("No existe el trabajo 99."));
         llamar(get("/api/v1/trabajos/99"), estudiante(), null).andExpect(status().isNotFound()).andExpect(cumpleContrato());
         llamar(get("/api/v1/trabajos/0"), estudiante(), null)
-                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errores.id").exists()).andExpect(cumpleContratoSoloRespuesta());
     }
 
     @Test
@@ -228,6 +228,17 @@ class WorkContratoTest {
                 .when(trabajoService).eliminar(any(), eq(8));
         llamar(delete("/api/v1/trabajos/8"), estudiante(), null).andExpect(status().isConflict()).andExpect(cumpleContrato());
         llamar(put("/api/v1/trabajos/7"), docente(), TRABAJO).andExpect(status().isForbidden()).andExpect(cumpleContrato());
+        // @PathVariable @Positive + @Valid @RequestBody: el 400 tambien trae el mapa errores (campo del body)
+        llamar(put("/api/v1/trabajos/7"), estudiante(), TRABAJO.replace("Sistema de inventarios", "Sis"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Datos invalidos"))
+                .andExpect(jsonPath("$.errores.titulo").exists())
+                .andExpect(cumpleContratoSoloRespuesta());
+        // id de ruta no numerico: mismo formato, con el nombre del parametro
+        llamar(put("/api/v1/trabajos/abc"), estudiante(), TRABAJO)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errores.id").exists())
+                .andExpect(cumpleContratoSoloRespuesta());
     }
 
     @Test
@@ -265,7 +276,7 @@ class WorkContratoTest {
     @Test
     void revisionInvalida() throws Exception {
         llamar(patch("/api/v1/trabajos/7/rechazar"), docente(), "{\"motivo\":\"corto\"}")
-                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errores.motivo").exists()).andExpect(cumpleContratoSoloRespuesta());
         when(trabajoService.tomarRevision(any(), eq(7))).thenThrow(
                 NegocioException.conflicto("No se puede tomar en revision un trabajo en estado BORRADOR."));
         llamar(patch("/api/v1/trabajos/7/revisar"), docente(), null).andExpect(status().isConflict()).andExpect(cumpleContrato());
@@ -306,9 +317,11 @@ class WorkContratoTest {
     void calificarErrores() throws Exception {
         // Bean Validation: falta o negativa
         llamar(patch("/api/v1/trabajos/7/calificar"), docente(), "{\"calificacion\":-1}")
-                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Datos invalidos"))
+                .andExpect(jsonPath("$.errores.calificacion").exists()).andExpect(cumpleContratoSoloRespuesta());
         llamar(patch("/api/v1/trabajos/7/calificar"), docente(), "{}")
-                .andExpect(status().isBadRequest()).andExpect(cumpleContratoSoloRespuesta());
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.errores.calificacion").exists()).andExpect(cumpleContratoSoloRespuesta());
         // Rango de la facultad (service)
         when(trabajoService.calificar(any(), eq(7), any())).thenThrow(
                 NegocioException.campoInvalido("calificacion", "debe estar entre 0 y 100"));
