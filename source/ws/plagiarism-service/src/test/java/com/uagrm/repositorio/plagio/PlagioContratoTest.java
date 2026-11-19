@@ -122,6 +122,14 @@ class PlagioContratoTest {
         when(plagioService.iniciar(any(), eq(9))).thenThrow(NegocioException.datosInvalidos(
                 "El trabajo no tiene archivos analizables: se analizan documentos PDF, DOCX u ODT."));
         llamar(post("/api/v1/plagio/trabajos/9"), docente()).andExpect(status().isBadRequest()).andExpect(cumpleContrato());
+        // COPYLEAKS sin internet ni repositorio privado (plagio-api 1.0.1)
+        when(plagioService.iniciar(any(), eq(12))).thenThrow(NegocioException.datosInvalidos(
+                "No hay contra que comparar: active la comparacion con internet en la configuracion de la facultad "
+                        + "o configure el repositorio privado de Copyleaks."));
+        llamar(post("/api/v1/plagio/trabajos/12"), docente())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.startsWith("No hay contra que comparar")))
+                .andExpect(cumpleContrato());
         when(plagioService.iniciar(any(), eq(10))).thenThrow(NegocioException.noEncontrado("No existe el trabajo 10."));
         llamar(post("/api/v1/plagio/trabajos/10"), docente()).andExpect(status().isNotFound()).andExpect(cumpleContrato());
         when(plagioService.iniciar(any(), eq(11))).thenThrow(NegocioException.noDisponible(

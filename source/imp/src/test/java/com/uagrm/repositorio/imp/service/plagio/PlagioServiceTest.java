@@ -194,6 +194,17 @@ class PlagioServiceTest {
     }
 
     @Test
+    void motorSinFuentesDeComparacionDa400SinCrearElAnalisis() {
+        when(configFacultad.configDe(1)).thenReturn(config(30, 50, false));
+        org.mockito.Mockito.doThrow(NegocioException.datosInvalidos("No hay contra que comparar."))
+                .when(motor).verificarFuentes(false);
+        assertStatus(() -> service.iniciar(jwt(TrabajoMock.ID_DOCENTE), TrabajoMock.ID_TRABAJO), HttpStatus.BAD_REQUEST);
+        verify(motor).verificarFuentes(false);
+        verify(analisisRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(despachador, cache);
+    }
+
+    @Test
     void sinMotorDa503() {
         when(motores.getIfAvailable()).thenReturn(null);
         assertStatus(() -> service.iniciar(jwt(TrabajoMock.ID_DOCENTE), TrabajoMock.ID_TRABAJO),

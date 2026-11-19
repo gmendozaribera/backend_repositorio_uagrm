@@ -1,11 +1,19 @@
 package com.uagrm.repositorio.plagio.copyleaks;
 
 import com.uagrm.repositorio.plagio.config.PlagioProperties;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.Base64;
 import java.util.Map;
+import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -15,6 +23,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Cliente HTTP de la API v3 de Copyleaks (verificada con docs.copyleaks.com en 2026-11):
@@ -22,7 +31,8 @@ import tools.jackson.databind.JsonNode;
  *   <li>Login: {@code POST https://id.copyleaks.com/v3/account/login/api} con {@code {email, key}} →
  *       {@code {access_token, .issued, .expires}}. El token dura 48 h.</li>
  *   <li>Envio: {@code PUT https://api.copyleaks.com/v3/scans/submit/file/{scanId}} con
- *       {@code {base64, filename, properties}} y {@code Authorization: Bearer}; responde 201 sin cuerpo.</li>
+ *       {@code {base64, filename, properties}} y {@code Authorization: Bearer}; responde 201 sin cuerpo. El cuerpo
+ *       se envia en streaming (base64 codificado al vuelo desde MinIO).</li>
  * </ul>
  *
  * <p>El token se guarda SOLO en memoria (no en Redis: no se confirmo una key para el) y se renueva 5 minutos antes
@@ -36,6 +46,8 @@ public class CopyleaksCliente {
 
     static final Duration MARGEN_RENOVACION = Duration.ofMinutes(5);
     static final Duration VIDA_POR_DEFECTO = Duration.ofHours(47);
+    private static final byte[] INICIO_CUERPO = "{\"base64\":\"".getBytes(StandardCharsets.UTF_8);
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final RestClient http;
     private final PlagioProperties.Copyleaks config;
@@ -56,30 +68,96 @@ public class CopyleaksCliente {
     }
 
     /**
-     * Envia un archivo a analizar.
+     * Envia un archivo a analizar, en streaming: el cuerpo {@code {"base64":"...","filename":...,"properties":{...}}}
+     * se escribe mientras se lee el archivo (ver {@link #escribirCuerpo}), sin tener nunca el archivo ni su base64
+     * completos en memoria.
      *
+     * @param contenido   abre el archivo (MinIO). Se llama una vez por intento: si Copyleaks responde 401 el cuerpo
+     *                    ya se consumio y el reintento vuelve a abrirlo
      * @param propiedades objeto {@code properties} de Copyleaks (sandbox, webhooks, scanning, indexing...)
      * @throws org.springframework.web.client.RestClientException si Copyleaks no responde o rechaza el envio
      */
-    public void enviarArchivo(String scanId, String nombreArchivo, String base64, Map<String, Object> propiedades) {
-        Map<String, Object> cuerpo = Map.of("base64", base64, "filename", nombreArchivo, "properties", propiedades);
+    public void enviarArchivo(String scanId, String nombreArchivo, Supplier<InputStream> contenido,
+                              Map<String, Object> propiedades) {
+        byte[] cola = cola(nombreArchivo, propiedades);
         try {
-            put(scanId, cuerpo, tokenVigente());
+            put(scanId, contenido, cola, tokenVigente());
         } catch (HttpClientErrorException.Unauthorized ex) {
             log.info("Copyleaks rechazo el token (401): se renueva y se reintenta una vez");
             invalidar();
-            put(scanId, cuerpo, tokenVigente());
+            put(scanId, contenido, cola, tokenVigente());
         }
     }
 
-    private void put(String scanId, Map<String, Object> cuerpo, String bearer) {
-        http.put()
-                .uri(config.apiUrl() + "/v3/scans/submit/file/{scanId}", scanId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .headers(h -> h.setBearerAuth(bearer))
-                .body(cuerpo)
-                .retrieve()
-                .toBodilessEntity();
+    private void put(String scanId, Supplier<InputStream> contenido, byte[] cola, String bearer) {
+        // El archivo se abre ANTES de conectar con Copyleaks: si MinIO falla no se llega a abrir la conexion
+        try (InputStream archivo = contenido.get()) {
+            http.put()
+                    .uri(config.apiUrl() + "/v3/scans/submit/file/{scanId}", scanId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .headers(h -> h.setBearerAuth(bearer))
+                    .body(salida -> escribirCuerpo(salida, archivo, cola))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (IOException ex) {
+            // solo el cierre del stream de MinIO llega aqui (los errores de red los envuelve RestClient)
+            throw new UncheckedIOException("No se pudo cerrar el archivo de " + scanId, ex);
+        }
+    }
+
+    /**
+     * Escribe el JSON del envio: {@code {"base64":"} + el archivo codificado al vuelo + {@code ","filename":...}}.
+     * El codificador base64 envuelve la salida sin cerrarla (cerrarlo solo agrega el relleno final "=") y despues se
+     * escribe el resto del JSON. La memoria usada es la de un buffer, sin importar el tamano del archivo.
+     */
+    static void escribirCuerpo(OutputStream salida, InputStream archivo, byte[] cola) throws IOException {
+        salida.write(INICIO_CUERPO);
+        try (OutputStream base64 = Base64.getEncoder().wrap(new SinCerrar(salida))) {
+            archivo.transferTo(base64);
+        }
+        salida.write(cola);
+        salida.flush();
+    }
+
+    /** {@code ","filename":"...","properties":{...}}} con escape JSON correcto (Jackson). */
+    static byte[] cola(String nombreArchivo, Map<String, Object> propiedades) {
+        ByteArrayOutputStream cola = new ByteArrayOutputStream();
+        cola.writeBytes("\",\"filename\":".getBytes(StandardCharsets.UTF_8));
+        cola.writeBytes(JSON.writeValueAsBytes(nombreArchivo));
+        cola.writeBytes(",\"properties\":".getBytes(StandardCharsets.UTF_8));
+        cola.writeBytes(JSON.writeValueAsBytes(propiedades));
+        cola.write('}');
+        return cola.toByteArray();
+    }
+
+    /** Pasa todo a la salida real pero no la cierra (la cierra la fabrica HTTP al terminar el request). */
+    private static final class SinCerrar extends OutputStream {
+
+        private final OutputStream destino;
+
+        SinCerrar(OutputStream destino) {
+            this.destino = destino;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            destino.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            destino.write(b, off, len);
+        }
+
+        @Override
+        public void flush() throws IOException {
+            destino.flush();
+        }
+
+        @Override
+        public void close() throws IOException {
+            destino.flush();
+        }
     }
 
     /** Token en memoria; login si no hay o le quedan menos de 5 minutos. */
@@ -126,6 +204,11 @@ public class CopyleaksCliente {
         return Instant.now().plus(VIDA_POR_DEFECTO);
     }
 
+    /**
+     * Fabrica SIN buffer: SimpleClientHttpRequestFactory (Spring 6.1+) escribe el cuerpo directo en la conexion; sin
+     * Content-Length usa Transfer-Encoding: chunked (bloques de 4 KB). Ojo: agregar interceptores al RestClient lo
+     * haria bufferizar el cuerpo entero en memoria.
+     */
     private static SimpleClientHttpRequestFactory tiempos() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(10));

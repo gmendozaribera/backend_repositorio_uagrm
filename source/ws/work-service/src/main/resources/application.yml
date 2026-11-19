@@ -3,6 +3,10 @@
 # Para desarrollo local: SPRING_PROFILES_ACTIVE=dev (ver application-dev.yml).
 server:
   port: ${SERVER_PORT:8084}
+  # Detras de nginx: Tomcat (RemoteIpValve) toma la IP real del cliente de X-Forwarded-For, pero SOLO si el request
+  # llega desde una IP interna/privada (10.x, 172.16-31.x, 192.168.x, 127.x, ::1...). Un visitante externo no puede
+  # falsificar su IP enviando la cabecera. La usa el limite del repositorio publico (work:rate:public:{ip}).
+  forward-headers-strategy: native
 
 spring:
   application:

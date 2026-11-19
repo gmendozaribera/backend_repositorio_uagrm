@@ -1,6 +1,7 @@
 package com.uagrm.repositorio.work.config;
 
 import com.uagrm.repositorio.dao.entity.TipoUsuario;
+import com.uagrm.repositorio.imp.redis.LimitePublicoService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.RevocacionTokenFilter;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
@@ -32,7 +33,8 @@ import org.springframework.web.cors.CorsConfigurationSource;
  * que el usuario no puede ver responde 404. Quien aun debe cambiar su contrasena no tiene rol: 403 en todo.</p>
  *
  * <p>Unica excepcion sin token: GET de /api/v1/publico/repositorio, /publico/repositorio/{id} y /publico/estado
- * (repositorio anonimo, segun ConfigFacultad.accesoExterno). Ver {@link #ignorarTokenEnRutasPublicas()}.</p>
+ * (repositorio anonimo, segun ConfigFacultad.accesoExterno). Ver {@link #ignorarTokenEnRutasPublicas()}. Los GET de
+ * /api/v1/publico/** tienen un limite por IP ({@link LimitePublicoFilter}).</p>
  */
 @Configuration
 public class SecurityConfig {
@@ -48,6 +50,7 @@ public class SecurityConfig {
                                             JwtAuthenticationConverter jwtAuthenticationConverter,
                                             CorsConfigurationSource corsConfigurationSource,
                                             RevocacionTokenService revocacionTokenService,
+                                            LimitePublicoService limitePublico,
                                             SeguridadErrorHandler errores) throws Exception {
         String estudiante = TipoUsuario.ESTUDIANTE;
         String docente = TipoUsuario.DOCENTE;
@@ -86,6 +89,9 @@ public class SecurityConfig {
                         .authenticationEntryPoint(errores)
                         .accessDeniedHandler(errores))
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(errores).accessDeniedHandler(errores))
+                // Limite por IP de /publico/** antes de todo lo demas: una IP que ya lo supero no gasta ni BD ni token
+                .addFilterBefore(new LimitePublicoFilter(limitePublico, errores),
+                        BearerTokenAuthenticationFilter.class)
                 .addFilterAfter(new RevocacionTokenFilter(revocacionTokenService, errores),
                         BearerTokenAuthenticationFilter.class);
         return http.build();

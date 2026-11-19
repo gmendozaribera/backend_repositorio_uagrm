@@ -2,13 +2,10 @@ package com.uagrm.repositorio.plagio.copyleaks;
 
 import com.uagrm.repositorio.dao.entity.TipoMotorPlagio;
 import com.uagrm.repositorio.imp.almacenamiento.AlmacenamientoArchivos;
+import com.uagrm.repositorio.imp.exception.NegocioException;
 import com.uagrm.repositorio.imp.service.plagio.MotorPlagio;
 import com.uagrm.repositorio.imp.service.plagio.SolicitudAnalisis;
 import com.uagrm.repositorio.plagio.config.PlagioProperties;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +29,9 @@ import org.springframework.stereotype.Component;
  *       compara contra lo ya indexado. NO se usa la base compartida de Copyleaks (Shared Data Hub): los trabajos no
  *       publicados de los estudiantes no deben quedar disponibles para otros clientes de Copyleaks.</li>
  * </ul>
- * El archivo se descarga de MinIO y se envia en base64 en memoria (hasta el tamano maximo de la facultad).
+ * El archivo pasa de MinIO a Copyleaks en streaming (se codifica en base64 mientras se envia, sin cargarlo entero en
+ * memoria: ver {@link CopyleaksCliente#enviarArchivo}). Sin internet ni repositorio privado no hay contra que
+ * comparar: {@link #verificarFuentes} responde 400 al iniciar.
  */
 @Slf4j
 @Component
@@ -41,6 +40,8 @@ import org.springframework.stereotype.Component;
 public class MotorCopyleaks implements MotorPlagio {
 
     static final String RUTA_WEBHOOK = "/api/v1/plagio/webhook/copyleaks/";
+    static final String SIN_FUENTES = "No hay contra que comparar: active la comparacion con internet en la "
+            + "configuracion de la facultad o configure el repositorio privado de Copyleaks.";
     private static final int LARGO_NOMBRE = 255;
 
     private final CopyleaksCliente cliente;
@@ -52,12 +53,25 @@ public class MotorCopyleaks implements MotorPlagio {
         return TipoMotorPlagio.COPYLEAKS;
     }
 
+    /**
+     * Copyleaks compara contra internet (si la facultad lo activo) y contra el repositorio privado (si hay
+     * COPYLEAKS_REPOSITORIO_ID). Sin ninguno de los dos el scan no compararia contra nada pero igual consumiria
+     * creditos: se rechaza con 400 antes de crear el analisis.
+     */
+    @Override
+    public void verificarFuentes(boolean comparacionInternet) {
+        if (!comparacionInternet && props.copyleaks().repositorioId().isBlank()) {
+            throw NegocioException.datosInvalidos(SIN_FUENTES);
+        }
+    }
+
     @Override
     public void enviar(SolicitudAnalisis solicitud) {
         for (SolicitudAnalisis.DocumentoAnalisis documento : solicitud.documentos()) {
             String scanId = solicitud.scanId() + "-" + documento.indice();
-            String base64 = Base64.getEncoder().encodeToString(leer(documento.rutaArchivo()));
-            cliente.enviarArchivo(scanId, nombre(documento.nombreArchivo()), base64,
+            // Cada intento de envio abre de nuevo el archivo en MinIO (el reintento tras un 401 necesita leerlo otra vez)
+            cliente.enviarArchivo(scanId, nombre(documento.nombreArchivo()),
+                    () -> almacenamiento.descargar(documento.rutaArchivo()),
                     propiedades(scanId, solicitud.comparacionInternet()));
             log.info("Documento {} del analisis {} enviado a Copyleaks (scan {})", documento.indice(),
                     solicitud.idAnalisis(), scanId);
@@ -83,14 +97,6 @@ public class MotorCopyleaks implements MotorPlagio {
     private String urlWebhook(String scanId) {
         String base = props.webhook().baseUrl().replaceAll("/+$", "");
         return base + RUTA_WEBHOOK + props.webhook().token() + "/{STATUS}/" + scanId;
-    }
-
-    private byte[] leer(String clave) {
-        try (InputStream contenido = almacenamiento.descargar(clave)) {
-            return contenido.readAllBytes();
-        } catch (IOException ex) {
-            throw new UncheckedIOException("No se pudo leer " + clave + " de MinIO", ex);
-        }
     }
 
     private static String nombre(String nombreArchivo) {

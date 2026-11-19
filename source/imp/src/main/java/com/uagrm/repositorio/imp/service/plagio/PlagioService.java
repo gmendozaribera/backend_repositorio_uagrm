@@ -136,6 +136,8 @@ public class PlagioService {
         }
 
         ConfigFacultadResponse config = configFacultad.configDe(idFacultad(trabajo));
+        // 400 ANTES de crear nada: sin fuentes de comparacion no se crea el analisis ni se gastan creditos
+        motor.verificarFuentes(config.comparacionInternet());
         AnalisisPlagio analisis = new AnalisisPlagio();
         analisis.setTrabajo(trabajo);
         analisis.setEstado(EstadoAnalisisPlagio.EN_PROCESO);

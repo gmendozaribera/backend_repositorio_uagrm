@@ -16,6 +16,16 @@ public interface MotorPlagio {
     TipoMotorPlagio tipo();
 
     /**
+     * Se llama al INICIAR, antes de crear el analisis: el motor verifica que tenga contra que comparar con la
+     * configuracion de la facultad. Por defecto no exige nada (SIMULADO).
+     *
+     * @param comparacionInternet ConfigFacultad.comparacionInternet de la facultad del trabajo
+     * @throws com.uagrm.repositorio.imp.exception.NegocioException 400 si no hay ninguna fuente de comparacion
+     */
+    default void verificarFuentes(boolean comparacionInternet) {
+    }
+
+    /**
      * Envia los documentos a analizar. Se llama fuera de toda transaccion HTTP (job de Quartz). Puede terminar
      * de forma sincrona (registrando ya los resultados) o asincrona (el resultado llega despues, p. ej. por webhook).
      *

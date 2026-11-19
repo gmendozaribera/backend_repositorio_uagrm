@@ -59,6 +59,15 @@ public final class ClavesRedis {
         return WORK + "rate:upload:" + idUsuario;
     }
 
+    /**
+     * work:rate:public:{ip} → consultas anonimas (GET /api/v1/publico/**) de esa IP en la ventana actual.
+     * IP normalizada con IpCliente (IPv6 agrupada por /64). TTL: 60 s desde la primera consulta de la ventana
+     * (ventana fija). Maximo: WORK_GROUP.PUBLICO_PETICIONES_POR_MINUTO.
+     */
+    public static String limitePublico(String ip) {
+        return WORK + "rate:public:" + ip;
+    }
+
     /** auth:rate:login:{ip} → intentos de login FALLIDOS desde esa IP. TTL: LOGIN_WAITING minutos desde el primero. */
     public static String limiteLogin(String ip) {
         return AUTH + "rate:login:" + ip;

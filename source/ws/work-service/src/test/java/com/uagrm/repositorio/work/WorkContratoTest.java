@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -35,6 +36,7 @@ import com.uagrm.repositorio.dto.trabajo.FiltrosRepositorio;
 import com.uagrm.repositorio.imp.config.SeguridadConfig;
 import com.uagrm.repositorio.imp.exception.LimiteIntentosException;
 import com.uagrm.repositorio.imp.exception.NegocioException;
+import com.uagrm.repositorio.imp.redis.LimitePublicoService;
 import com.uagrm.repositorio.imp.redis.RevocacionTokenService;
 import com.uagrm.repositorio.imp.security.JwtService;
 import com.uagrm.repositorio.imp.security.SeguridadErrorHandler;
@@ -137,6 +139,9 @@ class WorkContratoTest {
     private RepositorioService repositorioService;
     @MockitoBean
     private RevocacionTokenService revocacionTokenService;
+    /** Limite por IP de /publico/** (su logica real esta en LimitePublicoFilterTest); por defecto deja pasar. */
+    @MockitoBean
+    private LimitePublicoService limitePublicoService;
 
     // ---------- Trabajos ----------
 
@@ -551,6 +556,34 @@ class WorkContratoTest {
         llamar(get("/api/v1/publico/estado"), estudiante(), null)
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.habilitado").value(false))
                 .andExpect(cumpleContrato());
+    }
+
+    @Test
+    void demasiadasConsultasPublicasDevuelven429ConRetryAfter() throws Exception {
+        doThrow(new LimiteIntentosException(42, "Demasiadas consultas",
+                "Supero el limite de 60 consultas por minuto al repositorio publico. Intente de nuevo en 42 segundos."))
+                .when(limitePublicoService).registrar(any());
+        for (String ruta : List.of("/api/v1/publico/repositorio", "/api/v1/publico/repositorio/7", "/api/v1/publico/estado")) {
+            llamar(get(ruta), null, null)
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(header().string("Retry-After", "42"))
+                    .andExpect(jsonPath("$.detail").value(containsString("60 consultas por minuto")))
+                    .andExpect(cumpleContrato());
+        }
+        verifyNoInteractions(repositorioService);
+    }
+
+    @Test
+    void rutasAutenticadasNoPasanPorElLimitePublico() throws Exception {
+        when(repositorioService.buscar(any(), anyInt(), anyInt())).thenReturn(new PaginaResponse<>(
+                List.of(TrabajoMock.repositorioResumen()), 0, 20, 1, 1));
+        when(trabajoService.obtener(any(), eq(7))).thenReturn(
+                TrabajoMock.trabajoResponse(EstadoTrabajo.RECHAZADO, AccionesResponse.NINGUNA));
+        llamar(get("/api/v1/repositorio"), estudiante(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        llamar(get("/api/v1/trabajos/7"), admin(), null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        verifyNoInteractions(limitePublicoService);
+        llamar(get("/api/v1/publico/estado"), null, null);
+        verify(limitePublicoService).registrar("127.0.0.1");
     }
 
     @Test

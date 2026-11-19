@@ -84,6 +84,8 @@ public final class ConstantesDominio {
     public static final String VIDEO_MAX_MB = "VIDEO_MAX_MB";
     /** Autores de un trabajo como maximo, contando al que lo crea. */
     public static final String MAX_AUTORES = "MAX_AUTORES";
+    /** Consultas anonimas (/api/v1/publico/**) permitidas por IP en una ventana de 60 s (429 al superarlo). */
+    public static final String PUBLICO_PETICIONES_POR_MINUTO = "PUBLICO_PETICIONES_POR_MINUTO";
 
     // ---------- Nombres: PLAGIO_GROUP ----------
 
@@ -181,6 +183,7 @@ public final class ConstantesDominio {
         /** El limite multipart de work-service (101 MB por defecto) tambien acota este valor: ver su application.yml. */
         WORK_VIDEO_MAX_MB(entero(GRUPO_WORK, VIDEO_MAX_MB, 1, 1000, 100)),
         WORK_MAX_AUTORES(entero(GRUPO_WORK, MAX_AUTORES, 1, 20, 5)),
+        WORK_PUBLICO_PETICIONES_POR_MINUTO(entero(GRUPO_WORK, PUBLICO_PETICIONES_POR_MINUTO, 1, 10000, 60)),
 
         PLAGIO_TIMEOUT_MINUTOS(entero(GRUPO_PLAGIO, TIMEOUT_MINUTOS, 1, 1440, 30)),
         PLAGIO_SIMULADO_SEGUNDOS(entero(GRUPO_PLAGIO, SIMULADO_SEGUNDOS, 1, 300, 8)),

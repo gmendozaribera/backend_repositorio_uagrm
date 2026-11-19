@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -318,10 +319,53 @@ class CatalogContratoTest {
 
     // ---------- Errores ----------
 
+    // ---------- Listados sin sesion (catalog-api 1.3.0: security [{}, bearerAuth]) ----------
+
     @Test
-    void sinTokenDevuelve401() throws Exception {
-        llamar(get("/api/v1/carreras"), null, null)
+    void anonimoLeeLosListados() throws Exception {
+        when(facultadService.listar(anyBoolean())).thenReturn(List.of(CatalogoMock.facultadResponse()));
+        when(carreraService.listar(any(), anyBoolean())).thenReturn(List.of(CatalogoMock.carreraResponse()));
+        for (String listado : List.of("/api/v1/facultades", "/api/v1/carreras", "/api/v1/materias", "/api/v1/semestres",
+                "/api/v1/grupos", "/api/v1/fases", "/api/v1/tipos-trabajo")) {
+            llamar(get(listado), null, null).andExpect(status().isOk()).andExpect(cumpleContrato());
+        }
+        llamar(get("/api/v1/carreras").param("idFacultad", "1"), null, null)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].sigla").exists())
+                .andExpect(cumpleContrato());
+        llamar(get("/api/v1/grupos").param("idMateria", "20").param("idSemestre", "30"), null, null)
+                .andExpect(status().isOk()).andExpect(cumpleContrato());
+        // sin token no hay nada que revisar en la lista de revocados: no se consulta Redis
+        verifyNoInteractions(revocacionTokenService);
+    }
+
+    @Test
+    void anonimoNoLeeDocentesNiConfigNiEscribe() throws Exception {
+        llamar(get("/api/v1/grupos/40/docentes"), null, null)
                 .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(get("/api/v1/facultades/1/config"), null, null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(post("/api/v1/carreras"), null, CARRERA)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(post("/api/v1/facultades"), null, FACULTAD)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(put("/api/v1/facultades/1"), null, FACULTAD)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(delete("/api/v1/grupos/40"), null, null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        llamar(post("/api/v1/grupos/40/docentes"), null, "{\"idUsuario\":5,\"esAdminCurso\":true}")
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        verifyNoInteractions(grupoService, configFacultadService, carreraService, facultadService);
+    }
+
+    @Test
+    void listadoConTokenInvalidoORevocadoSigueDando401() throws Exception {
+        llamar(get("/api/v1/facultades"), "Bearer no-es-un-jwt", null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContratoSoloRespuesta());
+        when(revocacionTokenService.estaRevocado(any())).thenReturn(true);
+        llamar(get("/api/v1/carreras"), estudiante(), null)
+                .andExpect(status().isUnauthorized()).andExpect(cumpleContrato());
+        verifyNoInteractions(facultadService, carreraService);
     }
 
     @Test
